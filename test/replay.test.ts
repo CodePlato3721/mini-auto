@@ -182,6 +182,8 @@ describe("deterministic replay", () => {
     expect(evidence).toContain('"event":"replay.started"');
     expect(evidence).toContain('"event":"step.succeeded"');
     expect(evidence).toContain('"artifactId":"sauce-demo-checkout"');
+    expect(evidence).toContain('"password":"[REDACTED]"');
+    expect(evidence).not.toContain("secret_sauce");
   });
 
   it("returns a hard failure when an artifact cannot be validated", async () => {
@@ -216,5 +218,107 @@ describe("deterministic replay", () => {
       stepId: "invocation.inputs"
     });
     expect(surface.calls).toEqual([]);
+  });
+
+  it("denies actions outside the policy allowlist and captures richer failure evidence", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifact = checkoutArtifact();
+    artifact.policy.allowedActions = ["navigate", "type", "wait", "extract", "checkpoint"];
+    const result = await replayCapability({
+      artifactInput: artifact,
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir,
+      surface: createMemorySurface({
+        visibleText: "Inventory page with leaked secret_sauce value",
+        locators: {
+          "testId:username": "",
+          "testId:password": "",
+          "testId:login-button": ""
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "hard_failure",
+      stepId: "login",
+      expected: "Allowed action in policy"
+    });
+    const snapshotPath = result.evidence.find((evidencePath) => evidencePath.endsWith("login-snapshot.txt"));
+    expect(snapshotPath).toBeDefined();
+    const snapshot = await readFile(snapshotPath ?? "", "utf8");
+    expect(snapshot).toContain("[REDACTED]");
+    expect(snapshot).not.toContain("secret_sauce");
+  });
+
+  it("denies risky actions conservatively", async () => {
+    const artifact = checkoutArtifact();
+    artifact.steps[3].risk = "irreversible";
+
+    const result = await replayCapability({
+      artifactInput: artifact,
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir: await tempEvidenceDir(),
+      surface: createMemorySurface({
+        visibleText: "Inventory page",
+        locators: {
+          "testId:username": "",
+          "testId:password": "",
+          "testId:login-button": ""
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "hard_failure",
+      stepId: "login",
+      expected: "Safe or explicitly handled action"
+    });
+  });
+
+  it("denies post-action navigation outside the allowed route set", async () => {
+    const result = await replayCapability({
+      artifactInput: checkoutArtifact(),
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir: await tempEvidenceDir(),
+      surface: createMemorySurface({
+        finalUrl: "https://evil.example/phish",
+        visibleText: "Moved away",
+        locators: {
+          "testId:username": "",
+          "testId:password": "",
+          "testId:login-button": ""
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "hard_failure",
+      stepId: "login",
+      expected: "Allowed domain"
+    });
   });
 });

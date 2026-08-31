@@ -6,6 +6,7 @@ import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
   hardFailureReplayResult,
   parseCapabilityArtifact,
+  redactInvocationInputs,
   successReplayResult,
   type CapabilityArtifact,
   type CapabilityArtifactInput,
@@ -34,6 +35,7 @@ export type BrowserSurface = {
   hasLocator(candidate: LocatorCandidate): Promise<boolean>;
   currentUrl(): Promise<string>;
   visibleText(): Promise<string>;
+  captureFailureEvidence?(context: FailureEvidenceContext): Promise<string[]>;
   close?(): Promise<void>;
 };
 
@@ -65,6 +67,13 @@ type MemoryCall = {
 
 export type MemorySurface = BrowserSurface & {
   calls: MemoryCall[];
+};
+
+export type FailureEvidenceContext = {
+  evidenceDir: string;
+  artifactId: string;
+  stepId: string;
+  redact: (value: string) => string;
 };
 
 export async function replayCapabilityFromFile(options: ReplayFromFileOptions): Promise<ReplayResult> {
@@ -112,11 +121,13 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
 
   const surface = options.surface ?? (await createPlaywrightSurface());
   const outputs: Record<string, unknown> = {};
+  const redactor = createRedactor(artifact, options.inputs);
 
   logger.append("replay.started", {
     artifactId: artifact.metadata.id,
     schemaVersion: artifact.schemaVersion,
-    stepCount: artifact.steps.length
+    stepCount: artifact.steps.length,
+    inputs: redactInvocationInputs(artifact, options.inputs)
   });
 
   try {
@@ -124,10 +135,12 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
       logger.append("step.started", {
         artifactId: artifact.metadata.id,
         stepId: step.id,
-        action: step.action
+        action: step.action,
+        risk: step.risk
       });
 
       await executeStep({ artifact, step, inputs: options.inputs, outputs, surface });
+      await assertCurrentRouteAllowed(artifact, step, surface);
 
       logger.append("step.succeeded", {
         artifactId: artifact.metadata.id,
@@ -146,12 +159,19 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
     await logger.flush();
     return result;
   } catch (error) {
+    const stepId = error instanceof ReplayStepError ? error.stepId : "replay";
+    const richerEvidence = await surface.captureFailureEvidence?.({
+      evidenceDir: options.evidenceDir,
+      artifactId: artifact.metadata.id,
+      stepId,
+      redact: redactor
+    });
     const result = hardFailureReplayResult({
       artifactId: artifact.metadata.id,
-      stepId: error instanceof ReplayStepError ? error.stepId : "replay",
+      stepId,
       expected: error instanceof ReplayStepError ? error.expected : "Replay should complete without throwing",
-      observed: error instanceof Error ? error.message : String(error),
-      evidence: [logger.path]
+      observed: redactor(error instanceof Error ? error.message : String(error)),
+      evidence: [logger.path, ...(richerEvidence ?? [])]
     });
     logger.append("replay.failed", { result });
     await logger.flush();
@@ -170,9 +190,7 @@ async function executeStep(args: {
 }): Promise<void> {
   const { artifact, step, inputs, outputs, surface } = args;
 
-  if (!artifact.policy.allowedActions.includes(step.action)) {
-    throw new ReplayStepError(step.id, `Allowed action in policy`, `Action ${step.action} is not allowed`);
-  }
+  assertStepAllowed(artifact, step);
 
   switch (step.action) {
     case "navigate": {
@@ -207,6 +225,20 @@ async function executeStep(args: {
     }
     case "handoff":
       throw new ReplayStepError(step.id, "Deterministic replay action", "Handoff is not implemented until the handoff ticket");
+  }
+}
+
+function assertStepAllowed(artifact: CapabilityArtifact, step: CapabilityStep): void {
+  if (!artifact.policy.allowedActions.includes(step.action)) {
+    throw new ReplayStepError(step.id, "Allowed action in policy", `Action ${step.action} is not allowed`);
+  }
+
+  if (step.risk !== "safe") {
+    throw new ReplayStepError(
+      step.id,
+      "Safe or explicitly handled action",
+      `Action risk ${step.risk} requires ${artifact.policy.riskyActionHandling}`
+    );
   }
 }
 
@@ -300,6 +332,23 @@ function readWaitMilliseconds(step: CapabilityStep): number {
 
 function assertAllowedUrl(artifact: CapabilityArtifact, step: CapabilityStep, value: string): void {
   const url = new URL(value);
+  assertUrlAllowed(artifact, step, url);
+}
+
+async function assertCurrentRouteAllowed(
+  artifact: CapabilityArtifact,
+  step: CapabilityStep,
+  surface: BrowserSurface
+): Promise<void> {
+  const currentUrl = await surface.currentUrl();
+  if (!currentUrl.startsWith("http://") && !currentUrl.startsWith("https://")) {
+    return;
+  }
+
+  assertUrlAllowed(artifact, step, new URL(currentUrl));
+}
+
+function assertUrlAllowed(artifact: CapabilityArtifact, step: CapabilityStep, url: URL): void {
   if (!artifact.policy.allowedDomains.includes(url.hostname)) {
     throw new ReplayStepError(step.id, "Allowed domain", `Domain ${url.hostname} is not allowed`);
   }
@@ -404,6 +453,12 @@ export function createMemorySurface(options: MemorySurfaceOptions = {}): MemoryS
     },
     async visibleText() {
       return visibleText;
+    },
+    async captureFailureEvidence(context) {
+      const snapshotPath = path.resolve(context.evidenceDir, `${context.artifactId}-${context.stepId}-snapshot.txt`);
+      await mkdir(path.dirname(snapshotPath), { recursive: true });
+      await writeFile(snapshotPath, context.redact(`URL: ${url}\n\n${visibleText}\n`), "utf8");
+      return [snapshotPath];
     }
   };
 }
@@ -456,6 +511,16 @@ class PlaywrightSurface implements BrowserSurface {
     await this.browser.close();
   }
 
+  async captureFailureEvidence(context: FailureEvidenceContext): Promise<string[]> {
+    await mkdir(context.evidenceDir, { recursive: true });
+    const base = path.resolve(context.evidenceDir, `${context.artifactId}-${context.stepId}`);
+    const screenshotPath = `${base}.png`;
+    const snapshotPath = `${base}.html`;
+    await this.page.screenshot({ path: screenshotPath, fullPage: true });
+    await writeFile(snapshotPath, context.redact(await this.page.content()), "utf8");
+    return [screenshotPath, snapshotPath];
+  }
+
   private toLocator(locator: ResolvedLocator): Locator {
     const { candidate } = locator;
     switch (candidate.strategy) {
@@ -487,4 +552,16 @@ class PlaywrightSurface implements BrowserSurface {
         throw new Error("Visual locators are not supported by the Playwright adapter yet");
     }
   }
+}
+
+function createRedactor(artifact: CapabilityArtifact, inputs: Record<string, unknown>): (value: string) => string {
+  const sensitiveValues = artifact.inputs
+    .filter((input) => input.sensitive)
+    .map((input) => inputs[input.name])
+    .filter((value): value is string | number | boolean => typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    .map(String)
+    .filter((value) => value.length > 0);
+
+  return (value: string) =>
+    sensitiveValues.reduce((redacted, sensitiveValue) => redacted.split(sensitiveValue).join("[REDACTED]"), value);
 }
