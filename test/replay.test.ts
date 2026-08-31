@@ -321,4 +321,109 @@ describe("deterministic replay", () => {
       expected: "Allowed domain"
     });
   });
+
+  it("reports a missing product as a known business outcome", async () => {
+    const result = await replayCapability({
+      artifactInput: checkoutArtifact(),
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir: await tempEvidenceDir(),
+      surface: createMemorySurface({
+        visibleText: "Inventory page",
+        locators: {
+          "testId:username": "",
+          "testId:password": "",
+          "testId:login-button": ""
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      kind: "known_business_outcome",
+      outcome: "product_not_found",
+      stepId: "add-product"
+    });
+  });
+
+  it("reports invalid login as a known business outcome", async () => {
+    const result = await replayCapability({
+      artifactInput: checkoutArtifact(),
+      inputs: {
+        username: "standard_user",
+        password: "wrong_password",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir: await tempEvidenceDir(),
+      surface: createMemorySurface({
+        initialUrl: "https://www.saucedemo.com/",
+        visibleText: "Epic sadface: Username and password do not match any user in this service\nPassword for all users: secret_sauce",
+        locators: {
+          "testId:username": "",
+          "testId:password": "",
+          "testId:login-button": ""
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      kind: "known_business_outcome",
+      outcome: "invalid_login",
+      stepId: "login"
+    });
+    if (result.kind !== "known_business_outcome") {
+      throw new Error(`Expected known business outcome, received ${result.kind}`);
+    }
+    expect(result.observed).toContain("Password for all users: [REDACTED]");
+    expect(result.observed).not.toContain("secret_sauce");
+  });
+
+  it("recovers from transient locator misses with bounded retries in the evidence log", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const result = await replayCapability({
+      artifactInput: checkoutArtifact(),
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir,
+      surface: createMemorySurface({
+        initialUrl: "about:blank",
+        finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+        visibleText: "Thank you for your order!",
+        locators: {
+          "testId:username": "",
+          "testId:password": "",
+          "testId:login-button": "",
+          "relativeText:Sauce Labs Backpack >> Add to cart": "",
+          "testId:inventory-item-name": "Sauce Labs Backpack",
+          "testId:total-label": "Total: $32.39"
+        },
+        unavailableUntilAttempt: {
+          "relativeText:Sauce Labs Backpack >> Add to cart": 1
+        }
+      })
+    });
+
+    expect(result.kind).toBe("success");
+    const evidencePath = result.evidence[0];
+    const evidence = await readFile(evidencePath, "utf8");
+    expect(evidence).toContain('"event":"step.retrying"');
+    expect(evidence).toContain('"event":"step.recovered"');
+    expect(evidence).toContain('"recovery":"bounded_locator_retry"');
+  });
 });

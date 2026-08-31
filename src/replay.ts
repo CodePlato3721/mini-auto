@@ -5,6 +5,7 @@ import { chromium, type Browser, type Locator, type Page } from "playwright";
 
 import {
   hardFailureReplayResult,
+  knownBusinessOutcomeReplayResult,
   parseCapabilityArtifact,
   redactInvocationInputs,
   successReplayResult,
@@ -64,6 +65,7 @@ type MemorySurfaceOptions = {
   finalUrl?: string;
   visibleText?: string;
   locators?: Record<string, string>;
+  unavailableUntilAttempt?: Record<string, number>;
 };
 
 type MemoryCall = {
@@ -147,7 +149,8 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
         risk: step.risk
       });
 
-      await executeStep({ artifact, step, inputs: options.inputs, outputs, surface });
+      await executeStep({ artifact, step, inputs: options.inputs, outputs, surface, logger });
+      await assertKnownBusinessOutcome(artifact, step, surface);
       await assertCurrentRouteAllowed(artifact, step, surface);
 
       logger.append("step.succeeded", {
@@ -168,6 +171,19 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
     return result;
   } catch (error) {
     const stepId = error instanceof ReplayStepError ? error.stepId : "replay";
+    if (error instanceof ReplayOutcomeError) {
+      const result = knownBusinessOutcomeReplayResult({
+        artifactId: artifact.metadata.id,
+        outcome: error.outcome,
+        stepId,
+        observed: redactor(error.message),
+        evidence: [logger.path]
+      });
+      logger.append("replay.completed", { result });
+      await logger.flush();
+      return result;
+    }
+
     const richerEvidence = await surface.captureFailureEvidence?.({
       evidenceDir: options.evidenceDir,
       artifactId: artifact.metadata.id,
@@ -195,8 +211,9 @@ async function executeStep(args: {
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   surface: BrowserSurface;
+  logger: EvidenceLogger;
 }): Promise<void> {
-  const { artifact, step, inputs, outputs, surface } = args;
+  const { artifact, step, inputs, outputs, surface, logger } = args;
 
   assertStepAllowed(artifact, step);
 
@@ -208,12 +225,12 @@ async function executeStep(args: {
       return;
     }
     case "click": {
-      await surface.click(await resolveLocator(surface, step, inputs));
+      await surface.click(await resolveLocator(surface, step, inputs, logger));
       return;
     }
     case "type": {
       const value = readInputValue(step, inputs);
-      await surface.type(await resolveLocator(surface, step, inputs), value);
+      await surface.type(await resolveLocator(surface, step, inputs, logger), value);
       return;
     }
     case "wait": {
@@ -221,7 +238,7 @@ async function executeStep(args: {
       return;
     }
     case "extract": {
-      const text = await surface.extractText(await resolveLocator(surface, step, inputs));
+      const text = await surface.extractText(await resolveLocator(surface, step, inputs, logger));
       for (const outputName of Object.values(step.outputBindings)) {
         outputs[outputName] = text;
       }
@@ -253,28 +270,89 @@ function assertStepAllowed(artifact: CapabilityArtifact, step: CapabilityStep): 
 async function resolveLocator(
   surface: BrowserSurface,
   step: CapabilityStep,
-  inputs: Record<string, unknown>
+  inputs: Record<string, unknown>,
+  logger: EvidenceLogger
 ): Promise<ResolvedLocator> {
   if (!step.target) {
     throw new ReplayStepError(step.id, "Step target with locator candidates", "No target was declared");
   }
 
-  for (const rawCandidate of step.target.locatorCandidates) {
-    const candidate = interpolateLocator(rawCandidate, inputs);
-    if (await surface.hasLocator(candidate)) {
-      return {
-        candidate,
-        key: locatorKey(candidate),
-        stepId: step.id
-      };
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    for (const rawCandidate of step.target.locatorCandidates) {
+      const candidate = interpolateLocator(rawCandidate, inputs);
+      if (await surface.hasLocator(candidate)) {
+        if (attempt > 1) {
+          logger.append("step.recovered", {
+            stepId: step.id,
+            condition: "locator_not_ready",
+            recovery: "bounded_locator_retry",
+            attempts: attempt
+          });
+        }
+        return {
+          candidate,
+          key: locatorKey(candidate),
+          stepId: step.id
+        };
+      }
+    }
+
+    if (attempt < attempts) {
+      logger.append("step.retrying", {
+        stepId: step.id,
+        condition: "locator_not_ready",
+        recovery: "bounded_locator_retry",
+        attempt
+      });
+      await surface.wait(250);
     }
   }
 
+  throwKnownOutcomeForLocatorMiss(step, inputs);
   throw new ReplayStepError(
     step.id,
     "At least one locator candidate should resolve",
     `No locator candidate matched: ${step.target.locatorCandidates.map(locatorKey).join(", ")}`
   );
+}
+
+async function assertKnownBusinessOutcome(
+  artifact: CapabilityArtifact,
+  step: CapabilityStep,
+  surface: BrowserSurface
+): Promise<void> {
+  if (!isLoginStep(step)) {
+    return;
+  }
+
+  const currentUrl = await surface.currentUrl();
+  const text = await surface.visibleText();
+  const stillOnLogin = artifact.policy.allowedRoutes.includes("/") && currentUrl.endsWith("/");
+  if (stillOnLogin && /username and password do not match|epic sadface|locked out/i.test(text)) {
+    throw new ReplayOutcomeError(step.id, "invalid_login", text);
+  }
+}
+
+function throwKnownOutcomeForLocatorMiss(step: CapabilityStep, inputs: Record<string, unknown>): void {
+  if (!isProductSelectionStep(step)) {
+    return;
+  }
+
+  const productName = typeof inputs.productName === "string" ? inputs.productName : "requested product";
+  throw new ReplayOutcomeError(
+    step.id,
+    "product_not_found",
+    `Could not find an actionable control for product: ${productName}`
+  );
+}
+
+function isLoginStep(step: CapabilityStep): boolean {
+  return step.action === "click" && /login|submit/i.test(`${step.id} ${step.description}`);
+}
+
+function isProductSelectionStep(step: CapabilityStep): boolean {
+  return /product|add.*cart/i.test(`${step.id} ${step.description}`);
 }
 
 async function assertCheckpoint(
@@ -425,10 +503,21 @@ class ReplayStepError extends Error {
   }
 }
 
+class ReplayOutcomeError extends ReplayStepError {
+  constructor(
+    stepId: string,
+    readonly outcome: string,
+    observed: string
+  ) {
+    super(stepId, "Known business outcome check", observed);
+  }
+}
+
 export function createMemorySurface(options: MemorySurfaceOptions = {}): MemorySurface {
   let url = options.initialUrl ?? "about:blank";
   const visibleText = options.visibleText ?? "";
   const locators = options.locators ?? {};
+  const locatorAttempts = new Map<string, number>();
   const calls: MemoryCall[] = [];
 
   return {
@@ -454,7 +543,11 @@ export function createMemorySurface(options: MemorySurfaceOptions = {}): MemoryS
       return locators[locator.key] ?? "";
     },
     async hasLocator(candidate) {
-      return locatorKey(candidate) in locators;
+      const key = locatorKey(candidate);
+      const attempts = (locatorAttempts.get(key) ?? 0) + 1;
+      locatorAttempts.set(key, attempts);
+      const unavailableUntilAttempt = options.unavailableUntilAttempt?.[key] ?? 0;
+      return key in locators && attempts > unavailableUntilAttempt;
     },
     async currentUrl() {
       return url;
@@ -616,6 +709,11 @@ function createRedactor(artifact: CapabilityArtifact, inputs: Record<string, unk
     .map(String)
     .filter((value) => value.length > 0);
 
-  return (value: string) =>
-    sensitiveValues.reduce((redacted, sensitiveValue) => redacted.split(sensitiveValue).join("[REDACTED]"), value);
+  return (value: string) => {
+    const redactedInputs = sensitiveValues.reduce(
+      (redacted, sensitiveValue) => redacted.split(sensitiveValue).join("[REDACTED]"),
+      value
+    );
+    return redactedInputs.replace(/(password(?:\s+for\s+all\s+users)?\s*:\s*)(\S+)/gi, "$1[REDACTED]");
+  };
 }
