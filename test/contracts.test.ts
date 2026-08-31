@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -66,6 +68,14 @@ function validArtifact(): CapabilityArtifactInput {
 }
 
 describe("capability artifact contracts", () => {
+  it("accepts the checked-in Sauce Demo checkout artifact", async () => {
+    const artifact = JSON.parse(await readFile("artifacts/sauce-demo-checkout.json", "utf8")) as unknown;
+    const parsed = parseCapabilityArtifact(artifact);
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.artifact?.metadata.id).toBe("sauce-demo-checkout");
+  });
+
   it("accepts a versioned artifact with typed IO, locators, policy, steps, and checkpoint", () => {
     const parsed = parseCapabilityArtifact(validArtifact());
 

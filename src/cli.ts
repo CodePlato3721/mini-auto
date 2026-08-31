@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { replayCapabilityFromFile, type BrowserSurface } from "./replay.js";
+
 type CommandName = "discover" | "replay" | "replay-only";
-type ResultKind = "success" | "configuration_error";
+type ResultKind = "success" | "configuration_error" | "hard_failure" | "known_business_outcome" | "recoverable_condition";
 
 type CliResult = {
   ok: boolean;
@@ -32,8 +35,8 @@ const HELP_TEXT = `mini-auto
 
 Usage:
   mini-auto discover --goal <text> --target-url <url> [--dry-run] [--json]
-  mini-auto replay --artifact <path> [--json]
-  mini-auto replay-only --artifact <path> [--json]
+  mini-auto replay --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--json]
+  mini-auto replay-only --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--json]
 
 Commands:
   discover     ${COMMANDS.discover}
@@ -152,9 +155,37 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
     data: {
       artifact,
       evidenceDir,
+      inputs: readInputsJson(parsed.flags),
       mode: parsed.command === "replay-only" ? "replay-only" : "replay"
     }
   };
+}
+
+function readInputsJson(flags: Map<string, string | boolean>): Record<string, unknown> {
+  const inputsFile = readStringFlag(flags, "inputs-file");
+  const raw = readStringFlag(flags, "inputs-json");
+
+  if (inputsFile && raw) {
+    throw new Error("Use either --inputs-json or --inputs-file, not both");
+  }
+
+  if (inputsFile) {
+    return parseInputsJson(readFileSync(inputsFile, "utf8"));
+  }
+
+  if (!raw) {
+    return {};
+  }
+
+  return parseInputsJson(raw);
+}
+
+function parseInputsJson(raw: string): Record<string, unknown> {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Replay inputs must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function isCommandName(command: string): command is CommandName {
@@ -188,14 +219,60 @@ function formatResult(result: CliResult, asJson: boolean): string {
 
 export async function runCli(
   argv: string[],
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  deps: { replaySurface?: BrowserSurface } = {}
 ): Promise<{ result: CliResult; stdout: string; exitCode: number }> {
   const parsed = parseArgs(argv);
   const asJson = parsed.flags.has("json");
-  const result = validateCommand(parsed, env);
+  let result: CliResult;
+
+  try {
+    result = validateCommand(parsed, env);
+  } catch (error) {
+    const command = parsed.command && isCommandName(parsed.command) ? parsed.command : undefined;
+    result = {
+      ok: false,
+      kind: "configuration_error",
+      command,
+      message: "Command configuration is invalid.",
+      errors: [error instanceof Error ? error.message : String(error)]
+    };
+  }
 
   if (result.ok && result.data && typeof result.data.evidenceDir === "string") {
     await mkdir(path.resolve(result.data.evidenceDir), { recursive: true });
+  }
+
+  if (
+    result.ok &&
+    (result.command === "replay" || result.command === "replay-only") &&
+    result.data &&
+    typeof result.data.artifact === "string" &&
+    typeof result.data.evidenceDir === "string"
+  ) {
+    try {
+      const replayResult = await replayCapabilityFromFile({
+        artifactPath: result.data.artifact,
+        evidenceDir: result.data.evidenceDir,
+        inputs: readRecord(result.data.inputs),
+        surface: deps.replaySurface
+      });
+      result = {
+        ok: replayResult.ok,
+        kind: replayResult.kind,
+        command: result.command,
+        message: replayResult.ok ? "Replay completed." : "Replay failed.",
+        data: { replay: replayResult }
+      };
+    } catch (error) {
+      result = {
+        ok: false,
+        kind: "configuration_error",
+        command: result.command,
+        message: "Replay configuration is invalid.",
+        errors: [error instanceof Error ? error.message : String(error)]
+      };
+    }
   }
 
   return {
@@ -203,6 +280,10 @@ export async function runCli(
     stdout: formatResult(result, asJson),
     exitCode: result.ok ? 0 : 1
   };
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 async function main(): Promise<void> {
