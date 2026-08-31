@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli.js";
+import type { DecisionEngine } from "../src/discovery.js";
 import { createMemorySurface } from "../src/replay.js";
 
 const tempDirs: string[] = [];
@@ -37,6 +38,46 @@ describe("CLI scaffold", () => {
     expect(result.errors).toContain("Missing required flag: --goal <text>");
     expect(result.errors).toContain("Missing required flag: --target-url <url>");
     expect(JSON.parse(stdout)).toMatchObject({ ok: false, kind: "configuration_error" });
+  });
+
+  it("runs discovery through a structured decision engine and returns the artifact path", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const inputsPath = path.join(evidenceDir, "inputs.json");
+    await writeFile(inputsPath, JSON.stringify({ username: "standard_user", password: "secret_sauce" }), "utf8");
+    const decisionEngine: DecisionEngine = {
+      async decide(_observation, context) {
+        if (context.stepNumber === 1) {
+          return {
+            action: "navigate",
+            description: "Open target.",
+            target: { locatorCandidates: [{ strategy: "url", value: context.targetUrl }] },
+            risk: "safe"
+          };
+        }
+        return { complete: true };
+      }
+    };
+
+    const { result, stdout, exitCode } = await runCli(
+      ["discover", "--goal", "Open Sauce Demo", "--target-url", "https://www.saucedemo.com/", "--inputs-file", inputsPath, "--json"],
+      { MINI_AUTO_EVIDENCE_DIR: evidenceDir, MINI_AUTO_MODEL_API_KEY: "test-key" },
+      {
+        decisionEngine,
+        discoverySurface: createMemorySurface({ visibleText: "Ready" })
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(stdout)).toMatchObject({
+      ok: true,
+      command: "discover",
+      data: {
+        discovery: {
+          kind: "success"
+        }
+      }
+    });
   });
 
   it("validates a replay-only command and returns machine-readable output", async () => {

@@ -5,6 +5,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { discoverCapability, type DecisionEngine } from "./discovery.js";
 import { replayCapabilityFromFile, type BrowserSurface } from "./replay.js";
 
 type CommandName = "discover" | "replay" | "replay-only";
@@ -34,7 +35,7 @@ const COMMANDS: Record<CommandName, string> = {
 const HELP_TEXT = `mini-auto
 
 Usage:
-  mini-auto discover --goal <text> --target-url <url> [--dry-run] [--json]
+  mini-auto discover --goal <text> --target-url <url> [--inputs-json <json> | --inputs-file <path>] [--dry-run] [--json]
   mini-auto replay --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--json]
   mini-auto replay-only --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--json]
 
@@ -132,7 +133,7 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
       kind: "success",
       command: parsed.command,
       message: dryRun ? "Discovery command validated in dry-run mode." : "Discovery command validated.",
-      data: { goal, targetUrl, evidenceDir, dryRun }
+      data: { goal, targetUrl, evidenceDir, inputs: readInputsJson(parsed.flags), dryRun }
     };
   }
 
@@ -220,7 +221,7 @@ function formatResult(result: CliResult, asJson: boolean): string {
 export async function runCli(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
-  deps: { replaySurface?: BrowserSurface } = {}
+  deps: { replaySurface?: BrowserSurface; discoverySurface?: BrowserSurface; decisionEngine?: DecisionEngine } = {}
 ): Promise<{ result: CliResult; stdout: string; exitCode: number }> {
   const parsed = parseArgs(argv);
   const asJson = parsed.flags.has("json");
@@ -241,6 +242,32 @@ export async function runCli(
 
   if (result.ok && result.data && typeof result.data.evidenceDir === "string") {
     await mkdir(path.resolve(result.data.evidenceDir), { recursive: true });
+  }
+
+  if (
+    result.ok &&
+    result.command === "discover" &&
+    result.data &&
+    result.data.dryRun !== true &&
+    typeof result.data.goal === "string" &&
+    typeof result.data.targetUrl === "string" &&
+    typeof result.data.evidenceDir === "string"
+  ) {
+    const discoveryResult = await discoverCapability({
+      goal: result.data.goal,
+      targetUrl: result.data.targetUrl,
+      evidenceDir: result.data.evidenceDir,
+      inputs: readRecord(result.data.inputs),
+      surface: deps.discoverySurface,
+      decisionEngine: deps.decisionEngine
+    });
+    result = {
+      ok: discoveryResult.ok,
+      kind: discoveryResult.kind,
+      command: result.command,
+      message: discoveryResult.message,
+      data: { discovery: discoveryResult }
+    };
   }
 
   if (

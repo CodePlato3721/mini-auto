@@ -35,8 +35,16 @@ export type BrowserSurface = {
   hasLocator(candidate: LocatorCandidate): Promise<boolean>;
   currentUrl(): Promise<string>;
   visibleText(): Promise<string>;
+  title?(): Promise<string>;
+  interactiveControls?(): Promise<ObservedControl[]>;
+  screenshot?(context: { evidenceDir: string; name: string }): Promise<string>;
   captureFailureEvidence?(context: FailureEvidenceContext): Promise<string[]>;
   close?(): Promise<void>;
+};
+
+export type ObservedControl = {
+  text: string;
+  locatorCandidates: LocatorCandidate[];
 };
 
 export type ResolvedLocator = {
@@ -454,6 +462,24 @@ export function createMemorySurface(options: MemorySurfaceOptions = {}): MemoryS
     async visibleText() {
       return visibleText;
     },
+    async title() {
+      return "Memory Surface";
+    },
+    async interactiveControls() {
+      return Object.keys(locators).map((key) => {
+        const [strategy, ...valueParts] = key.split(":");
+        return {
+          text: locators[key],
+          locatorCandidates: [{ strategy: strategy as LocatorCandidate["strategy"], value: valueParts.join(":") }]
+        };
+      });
+    },
+    async screenshot(context) {
+      const screenshotPath = path.resolve(context.evidenceDir, `${context.name}.txt`);
+      await mkdir(path.dirname(screenshotPath), { recursive: true });
+      await writeFile(screenshotPath, visibleText, "utf8");
+      return screenshotPath;
+    },
     async captureFailureEvidence(context) {
       const snapshotPath = path.resolve(context.evidenceDir, `${context.artifactId}-${context.stepId}-snapshot.txt`);
       await mkdir(path.dirname(snapshotPath), { recursive: true });
@@ -463,7 +489,7 @@ export function createMemorySurface(options: MemorySurfaceOptions = {}): MemoryS
   };
 }
 
-async function createPlaywrightSurface(): Promise<BrowserSurface> {
+export async function createPlaywrightSurface(): Promise<BrowserSurface> {
   const browser = await chromium.launch();
   const page = await browser.newPage();
   return new PlaywrightSurface(browser, page);
@@ -505,6 +531,34 @@ class PlaywrightSurface implements BrowserSurface {
 
   async visibleText(): Promise<string> {
     return await this.page.locator("body").innerText();
+  }
+
+  async title(): Promise<string> {
+    return await this.page.title();
+  }
+
+  async interactiveControls(): Promise<ObservedControl[]> {
+    return await this.page.locator("a,button,input,select,textarea,[role=button]").evaluateAll((nodes) =>
+      nodes.slice(0, 50).map((node) => {
+        const element = node as HTMLElement;
+        const testId = element.getAttribute("data-test") ?? element.getAttribute("data-testid");
+        const label = element.getAttribute("aria-label") ?? element.getAttribute("name") ?? element.innerText ?? element.getAttribute("value") ?? "";
+        const locatorCandidates = testId
+          ? [{ strategy: "testId" as const, value: testId }]
+          : [{ strategy: "text" as const, value: label.trim() }];
+        return {
+          text: label.trim(),
+          locatorCandidates
+        };
+      })
+    );
+  }
+
+  async screenshot(context: { evidenceDir: string; name: string }): Promise<string> {
+    await mkdir(context.evidenceDir, { recursive: true });
+    const screenshotPath = path.resolve(context.evidenceDir, `${context.name}.png`);
+    await this.page.screenshot({ path: screenshotPath, fullPage: true });
+    return screenshotPath;
   }
 
   async close(): Promise<void> {
