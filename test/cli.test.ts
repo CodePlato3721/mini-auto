@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli.js";
 import type { DecisionEngine } from "../src/discovery.js";
-import { createMemorySurface } from "../src/replay.js";
+import { createMemorySurface, type HumanHandoffController } from "../src/replay.js";
 
 const tempDirs: string[] = [];
 
@@ -168,6 +168,91 @@ describe("CLI scaffold", () => {
       ok: false,
       kind: "configuration_error",
       command: "replay"
+    });
+  });
+
+  it("passes human handoff control through replay when requested", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifactPath = path.join(evidenceDir, "handoff-artifact.json");
+    await writeFile(
+      artifactPath,
+      JSON.stringify({
+        schemaVersion: "1.0.0",
+        metadata: {
+          id: "cli-handoff",
+          name: "CLI Handoff",
+          createdAt: "2026-08-31T00:00:00.000Z"
+        },
+        inputs: [{ name: "username", type: "string", required: true }],
+        outputs: [{ name: "resultKind", type: "string", required: true }],
+        policy: {
+          allowedDomains: ["www.saucedemo.com"],
+          allowedRoutes: ["/"],
+          allowedActions: ["navigate", "handoff", "checkpoint"]
+        },
+        steps: [
+          {
+            id: "open",
+            action: "navigate",
+            description: "Open target.",
+            target: {
+              locatorCandidates: [{ strategy: "url", value: "https://www.saucedemo.com/" }]
+            },
+            risk: "safe"
+          },
+          {
+            id: "manual",
+            action: "handoff",
+            description: "Let a human inspect the live session.",
+            risk: "safe"
+          },
+          {
+            id: "done",
+            action: "checkpoint",
+            description: "Verify target.",
+            risk: "safe"
+          }
+        ],
+        successCheckpoint: {
+          id: "complete",
+          urlIncludes: "saucedemo.com",
+          textIncludes: ["Ready"],
+          outputAssertions: { resultKind: "success" }
+        }
+      }),
+      "utf8"
+    );
+    let handoffStepId: string | undefined;
+    const handoffController: HumanHandoffController = {
+      async waitForResume(context) {
+        handoffStepId = context.request.stepId;
+        return { signal: "resume", activities: [{ description: "Human resumed from CLI test." }] };
+      }
+    };
+
+    const { result, stdout, exitCode } = await runCli(
+      ["replay", "--artifact", artifactPath, "--inputs-json", "{\"username\":\"standard_user\"}", "--human-handoff", "--json"],
+      { MINI_AUTO_EVIDENCE_DIR: evidenceDir },
+      {
+        replaySurface: createMemorySurface({
+          visibleText: "Ready"
+        }),
+        handoffController
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(handoffStepId).toBe("manual");
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(stdout)).toMatchObject({
+      ok: true,
+      command: "replay",
+      data: {
+        replay: {
+          kind: "success",
+          artifactId: "cli-handoff"
+        }
+      }
     });
   });
 });

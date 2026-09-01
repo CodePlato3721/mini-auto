@@ -1,5 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
+import type { Readable, Writable } from "node:stream";
 
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 
@@ -21,6 +23,10 @@ export type ReplayOptions = {
   inputs: Record<string, unknown>;
   evidenceDir: string;
   surface?: BrowserSurface;
+  handoff?: HumanHandoffController;
+  browser?: {
+    headless?: boolean;
+  };
 };
 
 export type ReplayFromFileOptions = Omit<ReplayOptions, "artifactInput"> & {
@@ -54,6 +60,39 @@ export type ResolvedLocator = {
   stepId: string;
 };
 
+export type AutomationOwnership = "automation" | "human" | "resumed_automation";
+
+export type HumanInterventionRequest = {
+  id: string;
+  artifactId: string;
+  goal: string;
+  stepId: string;
+  reason: string;
+  expected: string;
+  observed: string;
+  evidence: string[];
+};
+
+export type HumanHandoffActivity = {
+  description: string;
+  observed?: string;
+};
+
+export type HumanHandoffResume = {
+  signal: "resume";
+  activities?: HumanHandoffActivity[];
+};
+
+export type HumanHandoffContext = {
+  request: HumanInterventionRequest;
+  surface: BrowserSurface;
+  ownership: AutomationOwnership;
+};
+
+export type HumanHandoffController = {
+  waitForResume(context: HumanHandoffContext): Promise<HumanHandoffResume>;
+};
+
 type EvidenceLogger = {
   path: string;
   append(event: string, data: Record<string, unknown>): void;
@@ -69,7 +108,7 @@ type MemorySurfaceOptions = {
 };
 
 type MemoryCall = {
-  type: "navigate" | "click" | "type" | "wait" | "extract" | "checkpoint";
+  type: "navigate" | "click" | "type" | "wait" | "extract" | "checkpoint" | "human";
   stepId?: string;
   locator?: string;
   value?: string;
@@ -129,9 +168,10 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
     return result;
   }
 
-  const surface = options.surface ?? (await createPlaywrightSurface());
+  const surface = options.surface ?? (await createPlaywrightSurface({ headless: options.browser?.headless ?? true }));
   const outputs: Record<string, unknown> = {};
   const redactor = createRedactor(artifact, options.inputs);
+  let ownership: AutomationOwnership = "automation";
 
   logger.append("replay.started", {
     artifactId: artifact.metadata.id,
@@ -149,7 +189,24 @@ export async function replayCapability(options: ReplayOptions): Promise<ReplayRe
         risk: step.risk
       });
 
-      await executeStep({ artifact, step, inputs: options.inputs, outputs, surface, logger });
+      logger.append("ownership.state", {
+        artifactId: artifact.metadata.id,
+        stepId: step.id,
+        owner: ownership
+      });
+
+      ownership = await executeStep({
+        artifact,
+        step,
+        inputs: options.inputs,
+        outputs,
+        surface,
+        logger,
+        handoff: options.handoff,
+        evidenceDir: options.evidenceDir,
+        redactor,
+        ownership
+      });
       await assertKnownBusinessOutcome(artifact, step, surface);
       await assertCurrentRouteAllowed(artifact, step, surface);
 
@@ -212,59 +269,96 @@ async function executeStep(args: {
   outputs: Record<string, unknown>;
   surface: BrowserSurface;
   logger: EvidenceLogger;
-}): Promise<void> {
+  handoff?: HumanHandoffController;
+  evidenceDir: string;
+  redactor: (value: string) => string;
+  ownership: AutomationOwnership;
+}): Promise<AutomationOwnership> {
   const { artifact, step, inputs, outputs, surface, logger } = args;
 
-  assertStepAllowed(artifact, step);
+  let ownership = await ensureStepAllowed(args);
 
   switch (step.action) {
     case "navigate": {
       const url = firstLocator(step, "url").value;
       assertAllowedUrl(artifact, step, url);
       await surface.navigate(url);
-      return;
+      return ownership;
     }
     case "click": {
       await surface.click(await resolveLocator(surface, step, inputs, logger));
-      return;
+      return ownership;
     }
     case "type": {
       const value = readInputValue(step, inputs);
       await surface.type(await resolveLocator(surface, step, inputs, logger), value);
-      return;
+      return ownership;
     }
     case "wait": {
       await surface.wait(readWaitMilliseconds(step));
-      return;
+      return ownership;
     }
     case "extract": {
       const text = await surface.extractText(await resolveLocator(surface, step, inputs, logger));
       for (const outputName of Object.values(step.outputBindings)) {
         outputs[outputName] = text;
       }
-      return;
+      return ownership;
     }
     case "checkpoint": {
       await assertCheckpoint(artifact, surface, outputs);
-      return;
+      return ownership;
     }
-    case "handoff":
-      throw new ReplayStepError(step.id, "Deterministic replay action", "Handoff is not implemented until the handoff ticket");
+    case "handoff": {
+      ownership = await requestHumanHandoff({
+        artifact,
+        step,
+        surface,
+        logger,
+        handoff: args.handoff,
+        evidenceDir: args.evidenceDir,
+        redactor: args.redactor,
+        ownership,
+        reason: "artifact_requested_handoff",
+        expected: "Human intervention and resume signal"
+      });
+      return ownership;
+    }
   }
 }
 
-function assertStepAllowed(artifact: CapabilityArtifact, step: CapabilityStep): void {
+async function ensureStepAllowed(args: {
+  artifact: CapabilityArtifact;
+  step: CapabilityStep;
+  surface: BrowserSurface;
+  logger: EvidenceLogger;
+  handoff?: HumanHandoffController;
+  evidenceDir: string;
+  redactor: (value: string) => string;
+  ownership: AutomationOwnership;
+}): Promise<AutomationOwnership> {
+  const { artifact, step } = args;
   if (!artifact.policy.allowedActions.includes(step.action)) {
     throw new ReplayStepError(step.id, "Allowed action in policy", `Action ${step.action} is not allowed`);
   }
 
-  if (step.risk !== "safe") {
+  if (step.risk !== "safe" && artifact.policy.riskyActionHandling !== "require_handoff") {
     throw new ReplayStepError(
       step.id,
       "Safe or explicitly handled action",
       `Action risk ${step.risk} requires ${artifact.policy.riskyActionHandling}`
     );
   }
+
+  if (step.risk !== "safe") {
+    return await requestHumanHandoff({
+      ...args,
+      reason: `unsafe_${step.risk}_action`,
+      expected: `Human review before ${step.action}`
+    });
+  }
+
+  return args.ownership;
 }
 
 async function resolveLocator(
@@ -513,6 +607,97 @@ class ReplayOutcomeError extends ReplayStepError {
   }
 }
 
+async function requestHumanHandoff(args: {
+  artifact: CapabilityArtifact;
+  step: CapabilityStep;
+  surface: BrowserSurface;
+  logger: EvidenceLogger;
+  handoff?: HumanHandoffController;
+  evidenceDir: string;
+  redactor: (value: string) => string;
+  ownership: AutomationOwnership;
+  reason: string;
+  expected: string;
+}): Promise<AutomationOwnership> {
+  if (!args.handoff) {
+    throw new ReplayStepError(
+      args.step.id,
+      "Human handoff controller",
+      `Step requires human handoff: ${args.reason}`
+    );
+  }
+
+  const evidence = await captureInterventionEvidence(args);
+  const request: HumanInterventionRequest = {
+    id: `${args.artifact.metadata.id}:${args.step.id}:${Date.now()}`,
+    artifactId: args.artifact.metadata.id,
+    goal: args.artifact.metadata.description ?? args.artifact.metadata.name,
+    stepId: args.step.id,
+    reason: args.reason,
+    expected: args.expected,
+    observed: args.redactor(await describeSurface(args.surface)),
+    evidence
+  };
+
+  args.logger.append("ownership.changed", {
+    artifactId: args.artifact.metadata.id,
+    stepId: args.step.id,
+    from: args.ownership,
+    to: "human"
+  });
+  args.logger.append("handoff.requested", request);
+
+  const resume = await args.handoff.waitForResume({
+    request,
+    surface: args.surface,
+    ownership: "human"
+  });
+
+  if (resume.signal !== "resume") {
+    throw new ReplayStepError(args.step.id, "Resume signal", `Received ${String(resume.signal)}`);
+  }
+
+  for (const activity of resume.activities ?? []) {
+    args.logger.append("handoff.human_activity", {
+      artifactId: args.artifact.metadata.id,
+      stepId: args.step.id,
+      description: activity.description,
+      observed: activity.observed ? args.redactor(activity.observed) : undefined
+    });
+  }
+
+  args.logger.append("ownership.changed", {
+    artifactId: args.artifact.metadata.id,
+    stepId: args.step.id,
+    from: "human",
+    to: "resumed_automation"
+  });
+  args.logger.append("handoff.resumed", {
+    artifactId: args.artifact.metadata.id,
+    stepId: args.step.id
+  });
+
+  return "resumed_automation";
+}
+
+async function captureInterventionEvidence(args: {
+  artifact: CapabilityArtifact;
+  step: CapabilityStep;
+  surface: BrowserSurface;
+  evidenceDir: string;
+  redactor: (value: string) => string;
+}): Promise<string[]> {
+  const snapshotPath = path.resolve(args.evidenceDir, `${args.artifact.metadata.id}-${args.step.id}-handoff.txt`);
+  await mkdir(path.dirname(snapshotPath), { recursive: true });
+  await writeFile(snapshotPath, args.redactor(await describeSurface(args.surface)), "utf8");
+  return [snapshotPath];
+}
+
+async function describeSurface(surface: BrowserSurface): Promise<string> {
+  const [currentUrl, visibleText] = await Promise.all([surface.currentUrl(), surface.visibleText()]);
+  return `URL: ${currentUrl}\n\n${visibleText}`;
+}
+
 export function createMemorySurface(options: MemorySurfaceOptions = {}): MemorySurface {
   let url = options.initialUrl ?? "about:blank";
   const visibleText = options.visibleText ?? "";
@@ -578,14 +763,50 @@ export function createMemorySurface(options: MemorySurfaceOptions = {}): MemoryS
       await mkdir(path.dirname(snapshotPath), { recursive: true });
       await writeFile(snapshotPath, context.redact(`URL: ${url}\n\n${visibleText}\n`), "utf8");
       return [snapshotPath];
+    },
+    async close() {
+      return;
     }
   };
 }
 
-export async function createPlaywrightSurface(): Promise<BrowserSurface> {
-  const browser = await chromium.launch();
+export async function createPlaywrightSurface(options: { headless?: boolean } = {}): Promise<BrowserSurface> {
+  const browser = await chromium.launch({ headless: options.headless ?? true });
   const page = await browser.newPage();
   return new PlaywrightSurface(browser, page);
+}
+
+export function createTerminalHandoffController(
+  input: Readable = process.stdin,
+  output: Writable = process.stdout
+): HumanHandoffController {
+  return {
+    async waitForResume(context) {
+      output.write(
+        [
+          "",
+          "Human handoff requested.",
+          `Goal: ${context.request.goal}`,
+          `Step: ${context.request.stepId}`,
+          `Reason: ${context.request.reason}`,
+          `Observed: ${context.request.observed}`,
+          `Evidence: ${context.request.evidence.join(", ")}`,
+          "Use the open browser session, then press Enter here to resume automation.",
+          ""
+        ].join("\n")
+      );
+      const readline = createInterface({ input, output });
+      try {
+        const description = await readline.question("Human activity summary (optional): ");
+        return {
+          signal: "resume",
+          activities: description.trim().length > 0 ? [{ description }] : [{ description: "Human resumed automation." }]
+        };
+      } finally {
+        readline.close();
+      }
+    }
+  };
 }
 
 class PlaywrightSurface implements BrowserSurface {

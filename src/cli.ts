@@ -6,7 +6,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { discoverCapability, type DecisionEngine } from "./discovery.js";
-import { replayCapabilityFromFile, type BrowserSurface } from "./replay.js";
+import {
+  createTerminalHandoffController,
+  replayCapabilityFromFile,
+  type BrowserSurface,
+  type HumanHandoffController
+} from "./replay.js";
 
 type CommandName = "discover" | "replay" | "replay-only";
 type ResultKind = "success" | "configuration_error" | "hard_failure" | "known_business_outcome" | "recoverable_condition";
@@ -36,8 +41,8 @@ const HELP_TEXT = `mini-auto
 
 Usage:
   mini-auto discover --goal <text> --target-url <url> [--inputs-json <json> | --inputs-file <path>] [--dry-run] [--json]
-  mini-auto replay --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--json]
-  mini-auto replay-only --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--json]
+  mini-auto replay --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
+  mini-auto replay-only --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
 
 Commands:
   discover     ${COMMANDS.discover}
@@ -157,7 +162,8 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
       artifact,
       evidenceDir,
       inputs: readInputsJson(parsed.flags),
-      mode: parsed.command === "replay-only" ? "replay-only" : "replay"
+      mode: parsed.command === "replay-only" ? "replay-only" : "replay",
+      humanHandoff: parsed.flags.has("human-handoff")
     }
   };
 }
@@ -221,7 +227,12 @@ function formatResult(result: CliResult, asJson: boolean): string {
 export async function runCli(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
-  deps: { replaySurface?: BrowserSurface; discoverySurface?: BrowserSurface; decisionEngine?: DecisionEngine } = {}
+  deps: {
+    replaySurface?: BrowserSurface;
+    discoverySurface?: BrowserSurface;
+    decisionEngine?: DecisionEngine;
+    handoffController?: HumanHandoffController;
+  } = {}
 ): Promise<{ result: CliResult; stdout: string; exitCode: number }> {
   const parsed = parseArgs(argv);
   const asJson = parsed.flags.has("json");
@@ -282,7 +293,11 @@ export async function runCli(
         artifactPath: result.data.artifact,
         evidenceDir: result.data.evidenceDir,
         inputs: readRecord(result.data.inputs),
-        surface: deps.replaySurface
+        surface: deps.replaySurface,
+        handoff: result.data.humanHandoff === true ? deps.handoffController ?? createTerminalHandoffController() : undefined,
+        browser: {
+          headless: result.data.humanHandoff !== true
+        }
       });
       result = {
         ok: replayResult.ok,

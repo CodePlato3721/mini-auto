@@ -4,7 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { CapabilityArtifactInput } from "../src/contracts.js";
-import { createMemorySurface, replayCapability } from "../src/replay.js";
+import {
+  createMemorySurface,
+  replayCapability,
+  type HumanHandoffController,
+  type HumanInterventionRequest
+} from "../src/replay.js";
 
 const tempDirs: string[] = [];
 
@@ -154,7 +159,6 @@ describe("deterministic replay", () => {
       surface
     });
 
-    expect(result.kind).toBe("success");
     if (result.kind !== "success") {
       throw new Error(`Expected success, received ${result.kind}`);
     }
@@ -261,6 +265,7 @@ describe("deterministic replay", () => {
   it("denies risky actions conservatively", async () => {
     const artifact = checkoutArtifact();
     artifact.steps[3].risk = "irreversible";
+    artifact.policy.riskyActionHandling = "block";
 
     const result = await replayCapability({
       artifactInput: artifact,
@@ -419,11 +424,191 @@ describe("deterministic replay", () => {
       })
     });
 
-    expect(result.kind).toBe("success");
+    if (result.kind !== "success") {
+      throw new Error(`Expected success, received ${JSON.stringify(result)}`);
+    }
     const evidencePath = result.evidence[0];
     const evidence = await readFile(evidencePath, "utf8");
     expect(evidence).toContain('"event":"step.retrying"');
     expect(evidence).toContain('"event":"step.recovered"');
     expect(evidence).toContain('"recovery":"bounded_locator_retry"');
+  });
+
+  it("pauses for explicit handoff, exposes the same session, records human activity, and resumes", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifact = checkoutArtifact();
+    artifact.policy.allowedActions = [...artifact.policy.allowedActions, "handoff"];
+    artifact.steps.splice(4, 0, {
+      id: "manual-inventory-check",
+      action: "handoff",
+      description: "Ask a human to inspect the inventory page before product selection.",
+      risk: "safe"
+    });
+    const surface = createMemorySurface({
+      initialUrl: "about:blank",
+      finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+      visibleText:
+        "Inventory page ready for manual inspection with secret_sauce hidden from evidence.\nThank you for your order!",
+      locators: {
+        "testId:username": "",
+        "testId:password": "",
+        "testId:login-button": "",
+        "relativeText:Sauce Labs Backpack >> Add to cart": "",
+        "testId:inventory-item-name": "Sauce Labs Backpack",
+        "testId:total-label": "Total: $32.39"
+      }
+    });
+    let request: HumanInterventionRequest | undefined;
+    const handoff: HumanHandoffController = {
+      async waitForResume(context) {
+        request = context.request;
+        expect(context.ownership).toBe("human");
+        expect(context.surface).toBe(surface);
+        await context.surface.wait(25);
+        return {
+          signal: "resume",
+          activities: [{ description: "Human confirmed inventory page is usable.", observed: "No password secret_sauce copied." }]
+        };
+      }
+    };
+
+    const result = await replayCapability({
+      artifactInput: artifact,
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir,
+      surface,
+      handoff
+    });
+
+    expect(result.kind).toBe("success");
+    expect(request).toMatchObject({
+      artifactId: "sauce-demo-checkout",
+      goal: "Sauce Demo Checkout",
+      stepId: "manual-inventory-check",
+      reason: "artifact_requested_handoff",
+      expected: "Human intervention and resume signal"
+    });
+    expect(request?.observed).toContain("URL:");
+    expect(request?.observed).not.toContain("secret_sauce");
+    expect(request?.evidence[0]).toContain("manual-inventory-check-handoff");
+    expect(surface.calls).toContainEqual({ type: "wait", value: "25" });
+
+    const evidence = await readFile(result.evidence[0], "utf8");
+    expect(evidence).toContain('"event":"ownership.changed"');
+    expect(evidence).toContain('"to":"human"');
+    expect(evidence).toContain('"to":"resumed_automation"');
+    expect(evidence).toContain('"event":"handoff.requested"');
+    expect(evidence).toContain('"event":"handoff.human_activity"');
+    expect(evidence).toContain('"event":"handoff.resumed"');
+    expect(evidence).not.toContain("secret_sauce");
+  });
+
+  it("requires handoff before risky actions and then resumes automated ownership", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifact = checkoutArtifact();
+    artifact.steps[4].risk = "risky";
+    const surface = createMemorySurface({
+      initialUrl: "about:blank",
+      finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+      visibleText: "Thank you for your order!",
+      locators: {
+        "testId:username": "",
+        "testId:password": "",
+        "testId:login-button": "",
+        "relativeText:Sauce Labs Backpack >> Add to cart": "",
+        "testId:inventory-item-name": "Sauce Labs Backpack",
+        "testId:total-label": "Total: $32.39"
+      }
+    });
+    const handoff: HumanHandoffController = {
+      async waitForResume(context) {
+        expect(context.request).toMatchObject({
+          stepId: "add-product",
+          reason: "unsafe_risky_action",
+          expected: "Human review before click"
+        });
+        return {
+          signal: "resume",
+          activities: [{ description: "Human approved the add-to-cart click." }]
+        };
+      }
+    };
+
+    const result = await replayCapability({
+      artifactInput: artifact,
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir,
+      surface,
+      handoff
+    });
+
+    expect(result.kind).toBe("success");
+    expect(surface.calls.find((call) => call.stepId === "add-product")).toMatchObject({
+      type: "click"
+    });
+    const evidence = await readFile(result.evidence[0], "utf8");
+    expect(evidence).toContain('"reason":"unsafe_risky_action"');
+    expect(evidence).toContain('"to":"resumed_automation"');
+  });
+
+  it("fails with an intervention request context when handoff has no controller", async () => {
+    const result = await replayCapability({
+      artifactInput: {
+        ...checkoutArtifact(),
+        policy: {
+          ...checkoutArtifact().policy,
+          allowedActions: [...checkoutArtifact().policy.allowedActions, "handoff"]
+        },
+        steps: [
+          checkoutArtifact().steps[0],
+          {
+            id: "manual-stop",
+            action: "handoff",
+            description: "Manual action is required.",
+            risk: "safe"
+          }
+        ]
+      },
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir: await tempEvidenceDir(),
+      surface: createMemorySurface({
+        visibleText: "Manual help needed.",
+        locators: {
+          "testId:username": ""
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "hard_failure",
+      stepId: "manual-stop",
+      expected: "Human handoff controller"
+    });
+    if (result.kind !== "hard_failure") {
+      throw new Error(`Expected hard failure, received ${result.kind}`);
+    }
+    expect(result.observed).toContain("artifact_requested_handoff");
   });
 });
