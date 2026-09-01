@@ -1,7 +1,9 @@
 node_modules/
 dist/
 coverage/
-evidence/
+evidence/*
+!evidence/demo/
+!evidence/demo/**
 .env
 .serena/
 .claude/

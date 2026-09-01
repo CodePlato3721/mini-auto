@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "kind": "success",
+  "command": "replay-only",
+  "message": "Replay completed.",
+  "data": {
+    "replay": {
+      "ok": true,
+      "kind": "success",
+      "artifactId": "sauce-demo-checkout",
+      "outputs": {
+        "orderedItem": "Sauce Labs Backpack",
+        "totalPrice": "Total: $32.39",
+        "confirmationMessage": "Thank you for your order!",
+        "resultKind": "success"
+      },
+      "evidence": [
+        "<repo>\\evidence\\demo\\deterministic-replay\\replay-2026-09-01T03-24-39-918Z.jsonl"
+      ]
+    }
+  }
+}

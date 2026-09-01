@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "kind": "success",
+  "command": "discover",
+  "message": "Discovery completed.",
+  "data": {
+    "discovery": {
+      "ok": true,
+      "kind": "success",
+      "artifactId": "discovered-sauce-demo-checkout",
+      "outputs": {
+        "artifactPath": "<repo>\\evidence\\demo\\scripted-discovery-example\\discovered-capability.json",
+        "recordedStepCount": 15
+      },
+      "evidence": [
+        "<repo>\\evidence\\demo\\scripted-discovery-example\\discovery-2026-09-01T03-24-39-860Z.jsonl"
+      ],
+      "artifactPath": "<repo>\\evidence\\demo\\scripted-discovery-example\\discovered-capability.json",
+      "message": "Discovery completed."
+    }
+  }
+}

@@ -1,0 +1,345 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "discovered-sauce-demo-checkout",
+    "name": "Discovered Sauce Demo Checkout",
+    "description": "Log in to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
+    "createdAt": "2026-09-01T03:24:39.885Z",
+    "source": "llm-discovery"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "required": true,
+      "sensitive": true
+    },
+    {
+      "name": "productName",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    },
+    {
+      "name": "firstName",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    },
+    {
+      "name": "lastName",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    },
+    {
+      "name": "postalCode",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    }
+  ],
+  "outputs": [
+    {
+      "name": "orderedItem",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "totalPrice",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "resultKind",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "policy": {
+    "allowedDomains": [
+      "www.saucedemo.com"
+    ],
+    "allowedRoutes": [
+      "/",
+      "/inventory.html",
+      "/cart.html",
+      "/checkout-step-one.html",
+      "/checkout-step-two.html",
+      "/checkout-complete.html"
+    ],
+    "allowedActions": [
+      "navigate",
+      "click",
+      "type",
+      "wait",
+      "extract",
+      "checkpoint"
+    ],
+    "riskyActionHandling": "require_handoff"
+  },
+  "steps": [
+    {
+      "id": "step-001",
+      "action": "navigate",
+      "description": "Open the Sauce Demo login page.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "url",
+            "value": "https://www.saucedemo.com/"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-002",
+      "action": "type",
+      "description": "Enter username.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "username"
+          }
+        ]
+      },
+      "inputBindings": {
+        "value": "username"
+      },
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-003",
+      "action": "type",
+      "description": "Enter password.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "password"
+          }
+        ]
+      },
+      "inputBindings": {
+        "value": "password"
+      },
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-004",
+      "action": "click",
+      "description": "Submit login.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "login-button"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-005",
+      "action": "click",
+      "description": "Add the requested product to the cart.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "relativeText",
+            "value": "{{productName}} >> Add to cart"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-006",
+      "action": "click",
+      "description": "Open the cart.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "shopping-cart-link"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-007",
+      "action": "extract",
+      "description": "Extract the cart item name.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "inventory-item-name"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {
+        "text": "orderedItem"
+      },
+      "risk": "safe"
+    },
+    {
+      "id": "step-008",
+      "action": "click",
+      "description": "Start checkout.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "checkout"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-009",
+      "action": "type",
+      "description": "Enter first name.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "firstName"
+          }
+        ]
+      },
+      "inputBindings": {
+        "value": "firstName"
+      },
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-010",
+      "action": "type",
+      "description": "Enter last name.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "lastName"
+          }
+        ]
+      },
+      "inputBindings": {
+        "value": "lastName"
+      },
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-011",
+      "action": "type",
+      "description": "Enter postal code.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "postalCode"
+          }
+        ]
+      },
+      "inputBindings": {
+        "value": "postalCode"
+      },
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-012",
+      "action": "click",
+      "description": "Continue checkout.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "continue"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-013",
+      "action": "extract",
+      "description": "Extract total price.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "total-label"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {
+        "text": "totalPrice"
+      },
+      "risk": "safe"
+    },
+    {
+      "id": "step-014",
+      "action": "click",
+      "description": "Finish checkout.",
+      "target": {
+        "locatorCandidates": [
+          {
+            "strategy": "testId",
+            "value": "finish"
+          }
+        ]
+      },
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    },
+    {
+      "id": "step-015",
+      "action": "checkpoint",
+      "description": "Verify checkout completion.",
+      "inputBindings": {},
+      "outputBindings": {},
+      "risk": "safe"
+    }
+  ],
+  "successCheckpoint": {
+    "id": "checkout-complete",
+    "urlIncludes": "/checkout-complete.html",
+    "textIncludes": [
+      "Thank you for your order!"
+    ],
+    "outputAssertions": {
+      "resultKind": "success"
+    }
+  }
+}
