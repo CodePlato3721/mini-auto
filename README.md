@@ -46,11 +46,10 @@ $env:MINI_AUTO_PASSWORD = "secret_sauce"
 
 Do not commit `.env`, local input files, raw ad hoc evidence, or API keys. The committed `evidence/demo/` files are sanitized; local evidence outside that folder stays ignored by git. The Sauce Demo password is treated as sensitive input and is redacted in replay and discovery logs.
 
-Keep `inputs.local.json` to non-secret fields. Pass the product in `--goal`; the CLI infers known Sauce Demo product names from the goal.
+Keep `inputs.local.json` to non-secret checkout fields. Pass the username and product in `--goal`; the CLI infers known Sauce Demo usernames and product names from the goal.
 
 ```json
 {
-  "username": "standard_user",
   "firstName": "Ada",
   "lastName": "Lovelace",
   "postalCode": "90210"
@@ -64,7 +63,7 @@ Deterministic replay needs no model key. Use the checked-in artifact, pass the p
 ```powershell
 npm run build
 $env:MINI_AUTO_PASSWORD = "secret_sauce"
-node dist\src\cli.js replay-only --artifact artifacts\sauce-demo-checkout.json --goal "Add Sauce Labs Backpack to the cart and complete checkout." --inputs-file inputs.local.json --json
+node dist\src\cli.js replay-only --artifact artifacts\sauce-demo-checkout.json --goal "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout." --inputs-file inputs.local.json --json
 ```
 
 Generate sanitized demo evidence, including replay evidence and a scripted discovery-runner example:
@@ -80,13 +79,13 @@ With `MINI_AUTO_MODEL_API_KEY` set, run a genuine discovery pass against the liv
 ```powershell
 $env:MINI_AUTO_EVIDENCE_DIR = "evidence/live-discovery"
 $env:MINI_AUTO_PASSWORD = "secret_sauce"
-node dist\src\cli.js discover --goal "Log in to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation." --target-url "https://www.saucedemo.com/" --inputs-file inputs.local.json --json
+node dist\src\cli.js discover --goal "Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation." --target-url "https://www.saucedemo.com/" --inputs-file inputs.local.json --json
 ```
 
 Replay the artifact produced by that discovery run:
 
 ```powershell
-node dist\src\cli.js replay-only --artifact evidence\live-discovery\discovered-capability.json --goal "Add Sauce Labs Backpack to the cart and complete checkout." --inputs-file inputs.local.json --json
+node dist\src\cli.js replay-only --artifact evidence\live-discovery\discovered-capability.json --goal "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout." --inputs-file inputs.local.json --json
 ```
 
 ## Exceptional Outcome Demo
@@ -95,7 +94,7 @@ Invalid login is classified as a known business outcome instead of an infrastruc
 
 ```powershell
 $env:MINI_AUTO_PASSWORD = "wrong_password"
-node dist\src\cli.js replay-only --artifact artifacts\sauce-demo-checkout.json --goal "Add Sauce Labs Backpack to the cart and complete checkout." --inputs-file inputs.local.json --json
+node dist\src\cli.js replay-only --artifact artifacts\sauce-demo-checkout.json --goal "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout." --inputs-file inputs.local.json --json
 ```
 
 ## Human Handoff Demo
@@ -104,7 +103,7 @@ Replay can pause on explicit `handoff` steps or risky actions that require hando
 
 ```powershell
 $env:MINI_AUTO_PASSWORD = "secret_sauce"
-node dist\src\cli.js replay --artifact artifacts\sauce-demo-checkout.json --goal "Add Sauce Labs Backpack to the cart and complete checkout." --inputs-file inputs.local.json --human-handoff --json
+node dist\src\cli.js replay --artifact artifacts\sauce-demo-checkout.json --goal "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout." --inputs-file inputs.local.json --human-handoff --json
 ```
 
 The checked-in Sauce Demo artifact has no handoff step, so this command behaves like replay unless the artifact is edited to include `handoff` or a risky action.

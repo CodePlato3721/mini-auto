@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     [
       "discover",
       "--goal",
-      "Log in to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
+      "Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
       "--target-url",
       "https://www.saucedemo.com/",
       "--inputs-json",
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
       "--artifact",
       "artifacts/sauce-demo-checkout.json",
       "--goal",
-      "Add Sauce Labs Backpack to the cart and complete checkout.",
+      "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout.",
       "--inputs-file",
       replayInputs,
       "--json"
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
       "--artifact",
       "artifacts/sauce-demo-checkout.json",
       "--goal",
-      "Add Sauce Labs Backpack to the cart and complete checkout.",
+      "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout.",
       "--inputs-file",
       badInputs,
       "--json"
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
       [
         "discover",
         "--goal",
-        "Log in to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
+        "Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
         "--target-url",
         "https://www.saucedemo.com/",
         "--inputs-file",
@@ -145,7 +145,6 @@ async function main(): Promise<void> {
 
 function fileInputs(): Record<string, string> {
   return {
-    username: "standard_user",
     firstName: "Ada",
     lastName: "Lovelace",
     postalCode: "90210"

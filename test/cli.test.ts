@@ -156,7 +156,7 @@ describe("CLI scaffold", () => {
     });
   });
 
-  it("fills password from MINI_AUTO_PASSWORD and productName from --goal", async () => {
+  it("fills username and productName from --goal and password from MINI_AUTO_PASSWORD", async () => {
     const evidenceDir = await tempEvidenceDir();
     const artifactPath = path.join(evidenceDir, "artifact.json");
     const inputsPath = path.join(evidenceDir, "inputs.json");
@@ -191,6 +191,14 @@ describe("CLI scaffold", () => {
             risk: "safe"
           },
           {
+            id: "enter-username",
+            action: "type",
+            description: "Enter username.",
+            target: { locatorCandidates: [{ strategy: "testId", value: "username" }] },
+            inputBindings: { value: "username" },
+            risk: "safe"
+          },
+          {
             id: "enter-password",
             action: "type",
             description: "Enter password.",
@@ -221,11 +229,12 @@ describe("CLI scaffold", () => {
       }),
       "utf8"
     );
-    await writeFile(inputsPath, JSON.stringify({ username: "standard_user" }), "utf8");
+    await writeFile(inputsPath, JSON.stringify({}), "utf8");
     const surface = createMemorySurface({
       finalUrl: "https://www.saucedemo.com/checkout-complete.html",
       visibleText: "Ready",
       locators: {
+        "testId:username": "",
         "testId:password": "",
         "relativeText:Sauce Labs Backpack >> Add to cart": ""
       }
@@ -237,7 +246,7 @@ describe("CLI scaffold", () => {
         "--artifact",
         artifactPath,
         "--goal",
-        "Add Sauce Labs Backpack to the cart.",
+        "Log in as standard_user and add Sauce Labs Backpack to the cart.",
         "--inputs-file",
         inputsPath,
         "--json"
@@ -250,10 +259,12 @@ describe("CLI scaffold", () => {
     expect(result.ok).toBe(true);
     expect(surface.calls).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ type: "type", value: "standard_user" }),
         expect.objectContaining({ type: "type", value: "secret_sauce" }),
         expect.objectContaining({ type: "click", locator: "relativeText:Sauce Labs Backpack >> Add to cart" })
       ])
     );
+    expect(stdout).not.toContain("standard_user");
     expect(stdout).not.toContain("secret_sauce");
   });
 

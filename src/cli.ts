@@ -181,6 +181,13 @@ function readInputs(
     inputs.password = env.MINI_AUTO_PASSWORD;
   }
 
+  if (inputs.username === undefined && options.goal) {
+    const username = inferSauceDemoUsername(options.goal);
+    if (username) {
+      inputs.username = username;
+    }
+  }
+
   if (inputs.productName === undefined && options.goal) {
     const productName = inferSauceDemoProductName(options.goal);
     if (productName) {
@@ -208,6 +215,19 @@ function readInputsJson(flags: Map<string, string | boolean>): Record<string, un
   }
 
   return parseInputsJson(raw);
+}
+
+function inferSauceDemoUsername(goal: string): string | undefined {
+  const knownUsernames = [
+    "standard_user",
+    "locked_out_user",
+    "problem_user",
+    "performance_glitch_user",
+    "error_user",
+    "visual_user"
+  ];
+  const normalizedGoal = goal.toLowerCase();
+  return knownUsernames.find((username) => normalizedGoal.includes(username.toLowerCase()));
 }
 
 function inferSauceDemoProductName(goal: string): string | undefined {
