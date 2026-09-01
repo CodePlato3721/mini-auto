@@ -26,8 +26,9 @@ describe("CLI scaffold", () => {
     expect(exitCode).toBe(0);
     expect(result.ok).toBe(true);
     expect(stdout).toContain("mini-auto discover --goal <text> --target-url <url>");
-    expect(stdout).toContain("mini-auto replay --artifact <path>");
-    expect(stdout).toContain("mini-auto replay-only --artifact <path>");
+    expect(stdout).toContain("mini-auto replay --artifact <path> [--goal <text>]");
+    expect(stdout).toContain("mini-auto replay-only --artifact <path> [--goal <text>]");
+    expect(stdout).toContain("MINI_AUTO_PASSWORD");
   });
 
   it("returns structured configuration errors instead of throwing", async () => {
@@ -153,6 +154,107 @@ describe("CLI scaffold", () => {
         }
       }
     });
+  });
+
+  it("fills password from MINI_AUTO_PASSWORD and productName from --goal", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifactPath = path.join(evidenceDir, "artifact.json");
+    const inputsPath = path.join(evidenceDir, "inputs.json");
+    await writeFile(
+      artifactPath,
+      JSON.stringify({
+        schemaVersion: "1.0.0",
+        metadata: {
+          id: "cli-input-fallbacks",
+          name: "CLI Input Fallbacks",
+          createdAt: "2026-09-01T00:00:00.000Z"
+        },
+        inputs: [
+          { name: "username", type: "string", required: true },
+          { name: "password", type: "string", required: true, sensitive: true },
+          { name: "productName", type: "string", required: true }
+        ],
+        outputs: [{ name: "resultKind", type: "string", required: true }],
+        policy: {
+          allowedDomains: ["www.saucedemo.com"],
+          allowedRoutes: ["/", "/checkout-complete.html"],
+          allowedActions: ["navigate", "type", "click", "checkpoint"]
+        },
+        steps: [
+          {
+            id: "open",
+            action: "navigate",
+            description: "Open target.",
+            target: {
+              locatorCandidates: [{ strategy: "url", value: "https://www.saucedemo.com/" }]
+            },
+            risk: "safe"
+          },
+          {
+            id: "enter-password",
+            action: "type",
+            description: "Enter password.",
+            target: { locatorCandidates: [{ strategy: "testId", value: "password" }] },
+            inputBindings: { value: "password" },
+            risk: "safe"
+          },
+          {
+            id: "add-product",
+            action: "click",
+            description: "Add product.",
+            target: { locatorCandidates: [{ strategy: "relativeText", value: "{{productName}} >> Add to cart" }] },
+            risk: "safe"
+          },
+          {
+            id: "done",
+            action: "checkpoint",
+            description: "Verify target.",
+            risk: "safe"
+          }
+        ],
+        successCheckpoint: {
+          id: "complete",
+          urlIncludes: "/checkout-complete.html",
+          textIncludes: ["Ready"],
+          outputAssertions: { resultKind: "success" }
+        }
+      }),
+      "utf8"
+    );
+    await writeFile(inputsPath, JSON.stringify({ username: "standard_user" }), "utf8");
+    const surface = createMemorySurface({
+      finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+      visibleText: "Ready",
+      locators: {
+        "testId:password": "",
+        "relativeText:Sauce Labs Backpack >> Add to cart": ""
+      }
+    });
+
+    const { result, stdout, exitCode } = await runCli(
+      [
+        "replay-only",
+        "--artifact",
+        artifactPath,
+        "--goal",
+        "Add Sauce Labs Backpack to the cart.",
+        "--inputs-file",
+        inputsPath,
+        "--json"
+      ],
+      { MINI_AUTO_EVIDENCE_DIR: evidenceDir, MINI_AUTO_PASSWORD: "secret_sauce" },
+      { replaySurface: surface }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(result.ok).toBe(true);
+    expect(surface.calls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "type", value: "secret_sauce" }),
+        expect.objectContaining({ type: "click", locator: "relativeText:Sauce Labs Backpack >> Add to cart" })
+      ])
+    );
+    expect(stdout).not.toContain("secret_sauce");
   });
 
   it("returns a structured configuration error when the artifact file is missing", async () => {

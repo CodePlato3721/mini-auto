@@ -6,15 +6,16 @@ import { describe, expect, it } from "vitest";
 describe("demo evidence", () => {
   it("keeps committed demo evidence sanitized and documented", async () => {
     const files = await listFiles(path.resolve("evidence", "demo"));
-    expect(files.map((file) => path.relative("evidence/demo", file).replace(/\\/g, "/"))).toEqual(
+    const relativeFiles = files.map((file) => path.relative("evidence/demo", file).replace(/\\/g, "/"));
+    expect(relativeFiles).toEqual(
       expect.arrayContaining([
         "MANIFEST.md",
         "discovered-capability.example.json",
         "deterministic-replay/result.json",
-        "exceptional-invalid-login/result.json",
-        "llm-discovery/README.md"
+        "exceptional-invalid-login/result.json"
       ])
     );
+    expect(relativeFiles.some((file) => file === "llm-discovery/README.md" || file === "llm-discovery/result.json")).toBe(true);
 
     const searchableBodies = await Promise.all(
       files.filter((file) => !file.endsWith(".png")).map((file) => readFile(file, "utf8"))
@@ -24,7 +25,7 @@ describe("demo evidence", () => {
     expect(combined).not.toContain("wrong_password");
     expect(combined).not.toContain("C:\\Users\\");
     expect(combined).toContain("known_business_outcome");
-    expect(combined).toContain("MINI_AUTO_MODEL_API_KEY");
+    expect(combined).toMatch(/MINI_AUTO_MODEL_API_KEY|\"command\": \"discover\"/);
   });
 });
 

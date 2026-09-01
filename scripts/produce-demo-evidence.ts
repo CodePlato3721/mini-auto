@@ -18,8 +18,6 @@ async function main(): Promise<void> {
     `${JSON.stringify(
       {
         username: "standard_user",
-        password: "[REDACTED]",
-        productName: "Sauce Labs Backpack",
         firstName: "Ada",
         lastName: "Lovelace",
         postalCode: "90210"
@@ -40,10 +38,14 @@ async function main(): Promise<void> {
       "--target-url",
       "https://www.saucedemo.com/",
       "--inputs-json",
-      JSON.stringify(validInputs()),
+      JSON.stringify(fileInputs()),
       "--json"
     ],
-    { MINI_AUTO_EVIDENCE_DIR: scriptedDiscoveryDir, MINI_AUTO_MODEL_API_KEY: "scripted-engine" },
+    {
+      MINI_AUTO_EVIDENCE_DIR: scriptedDiscoveryDir,
+      MINI_AUTO_MODEL_API_KEY: "scripted-engine",
+      MINI_AUTO_PASSWORD: demoPassword()
+    },
     {
       decisionEngine: scriptedCheckoutEngine(),
       discoverySurface: createMemorySurface({
@@ -64,10 +66,19 @@ async function main(): Promise<void> {
   const replayDir = path.join(evidenceRoot, "deterministic-replay");
   const replayInputs = path.join(replayDir, "inputs.local.json");
   await mkdir(replayDir, { recursive: true });
-  await writeFile(replayInputs, JSON.stringify(validInputs()), "utf8");
+  await writeFile(replayInputs, JSON.stringify(fileInputs()), "utf8");
   const replay = await runCli(
-    ["replay-only", "--artifact", "artifacts/sauce-demo-checkout.json", "--inputs-file", replayInputs, "--json"],
-    { MINI_AUTO_EVIDENCE_DIR: replayDir }
+    [
+      "replay-only",
+      "--artifact",
+      "artifacts/sauce-demo-checkout.json",
+      "--goal",
+      "Add Sauce Labs Backpack to the cart and complete checkout.",
+      "--inputs-file",
+      replayInputs,
+      "--json"
+    ],
+    { MINI_AUTO_EVIDENCE_DIR: replayDir, MINI_AUTO_PASSWORD: demoPassword() }
   );
   await rm(replayInputs, { force: true });
   await writeFile(path.join(replayDir, "result.json"), sanitize(replay.stdout), "utf8");
@@ -76,10 +87,19 @@ async function main(): Promise<void> {
   const exceptionalDir = path.join(evidenceRoot, "exceptional-invalid-login");
   const badInputs = path.join(exceptionalDir, "inputs.local.json");
   await mkdir(exceptionalDir, { recursive: true });
-  await writeFile(badInputs, JSON.stringify({ ...validInputs(), password: "wrong_password" }), "utf8");
+  await writeFile(badInputs, JSON.stringify(fileInputs()), "utf8");
   const exceptional = await runCli(
-    ["replay-only", "--artifact", "artifacts/sauce-demo-checkout.json", "--inputs-file", badInputs, "--json"],
-    { MINI_AUTO_EVIDENCE_DIR: exceptionalDir }
+    [
+      "replay-only",
+      "--artifact",
+      "artifacts/sauce-demo-checkout.json",
+      "--goal",
+      "Add Sauce Labs Backpack to the cart and complete checkout.",
+      "--inputs-file",
+      badInputs,
+      "--json"
+    ],
+    { MINI_AUTO_EVIDENCE_DIR: exceptionalDir, MINI_AUTO_PASSWORD: "wrong_password" }
   );
   await rm(badInputs, { force: true });
   await writeFile(path.join(exceptionalDir, "result.json"), sanitize(exceptional.stdout), "utf8");
@@ -87,9 +107,9 @@ async function main(): Promise<void> {
 
   const discoveryDir = path.join(evidenceRoot, "llm-discovery");
   await mkdir(discoveryDir, { recursive: true });
-  if (process.env.MINI_AUTO_MODEL_API_KEY) {
+  if (process.env.MINI_AUTO_MODEL_API_KEY && process.env.MINI_AUTO_PASSWORD) {
     const discoveryInputs = path.join(discoveryDir, "inputs.local.json");
-    await writeFile(discoveryInputs, JSON.stringify(validInputs()), "utf8");
+    await writeFile(discoveryInputs, JSON.stringify(fileInputs()), "utf8");
     const discovery = await runCli(
       [
         "discover",
@@ -112,8 +132,8 @@ async function main(): Promise<void> {
       [
         "# LLM Discovery Evidence",
         "",
-        "The genuine LLM discovery run requires `MINI_AUTO_MODEL_API_KEY` at generation time.",
-        "Run `npm run demo:evidence` with that environment variable set to populate this directory with a live discovery log and generated artifact.",
+        "The genuine LLM discovery run requires `MINI_AUTO_MODEL_API_KEY` and `MINI_AUTO_PASSWORD` at generation time.",
+        "Run `npm run demo:evidence` with those environment variables set to populate this directory with a live discovery log and generated artifact.",
         ""
       ].join("\n"),
       "utf8"
@@ -123,15 +143,17 @@ async function main(): Promise<void> {
   await writeManifest();
 }
 
-function validInputs(): Record<string, string> {
+function fileInputs(): Record<string, string> {
   return {
     username: "standard_user",
-    password: "secret_sauce",
-    productName: "Sauce Labs Backpack",
     firstName: "Ada",
     lastName: "Lovelace",
     postalCode: "90210"
   };
+}
+
+function demoPassword(): string {
+  return "secret_sauce";
 }
 
 function checkoutLocators(): Record<string, string> {

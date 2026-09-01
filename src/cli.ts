@@ -41,8 +41,8 @@ const HELP_TEXT = `mini-auto
 
 Usage:
   mini-auto discover --goal <text> --target-url <url> [--inputs-json <json> | --inputs-file <path>] [--dry-run] [--json]
-  mini-auto replay --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
-  mini-auto replay-only --artifact <path> [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
+  mini-auto replay --artifact <path> [--goal <text>] [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
+  mini-auto replay-only --artifact <path> [--goal <text>] [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
 
 Commands:
   discover     ${COMMANDS.discover}
@@ -52,6 +52,7 @@ Commands:
 Environment:
   MINI_AUTO_EVIDENCE_DIR   Directory for evidence output. Defaults to ./evidence.
   MINI_AUTO_MODEL_API_KEY  Required for discover unless --dry-run is set.
+  MINI_AUTO_PASSWORD       Optional password input fallback when inputs omit password.
 `;
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -138,11 +139,12 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
       kind: "success",
       command: parsed.command,
       message: dryRun ? "Discovery command validated in dry-run mode." : "Discovery command validated.",
-      data: { goal, targetUrl, evidenceDir, inputs: readInputsJson(parsed.flags), dryRun }
+      data: { goal, targetUrl, evidenceDir, inputs: readInputs(parsed.flags, env, { goal }), dryRun }
     };
   }
 
   const artifact = readStringFlag(parsed.flags, "artifact");
+  const goal = readStringFlag(parsed.flags, "goal");
   if (!artifact) {
     return {
       ok: false,
@@ -160,12 +162,33 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
     message: "Replay command validated.",
     data: {
       artifact,
+      goal,
       evidenceDir,
-      inputs: readInputsJson(parsed.flags),
+      inputs: readInputs(parsed.flags, env, { goal }),
       mode: parsed.command === "replay-only" ? "replay-only" : "replay",
       humanHandoff: parsed.flags.has("human-handoff")
     }
   };
+}
+
+function readInputs(
+  flags: Map<string, string | boolean>,
+  env: NodeJS.ProcessEnv,
+  options: { goal?: string } = {}
+): Record<string, unknown> {
+  const inputs = readInputsJson(flags);
+  if (inputs.password === undefined && env.MINI_AUTO_PASSWORD) {
+    inputs.password = env.MINI_AUTO_PASSWORD;
+  }
+
+  if (inputs.productName === undefined && options.goal) {
+    const productName = inferSauceDemoProductName(options.goal);
+    if (productName) {
+      inputs.productName = productName;
+    }
+  }
+
+  return inputs;
 }
 
 function readInputsJson(flags: Map<string, string | boolean>): Record<string, unknown> {
@@ -185,6 +208,19 @@ function readInputsJson(flags: Map<string, string | boolean>): Record<string, un
   }
 
   return parseInputsJson(raw);
+}
+
+function inferSauceDemoProductName(goal: string): string | undefined {
+  const knownProducts = [
+    "Sauce Labs Backpack",
+    "Sauce Labs Bike Light",
+    "Sauce Labs Bolt T-Shirt",
+    "Sauce Labs Fleece Jacket",
+    "Sauce Labs Onesie",
+    "Test.allTheThings() T-Shirt (Red)"
+  ];
+  const normalizedGoal = goal.toLowerCase();
+  return knownProducts.find((product) => normalizedGoal.includes(product.toLowerCase()));
 }
 
 function parseInputsJson(raw: string): Record<string, unknown> {

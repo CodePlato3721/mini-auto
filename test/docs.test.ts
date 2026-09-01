@@ -9,9 +9,12 @@ describe("project documentation", () => {
     expect(readme).toContain("npm install");
     expect(readme).toContain("npx playwright install chromium");
     expect(readme).toContain("MINI_AUTO_MODEL_API_KEY");
+    expect(readme).toContain("MINI_AUTO_PASSWORD");
     expect(readme).toContain("Do not commit `.env`, local input files, raw ad hoc evidence, or API keys.");
+    expect(readme).toContain("\"username\": \"standard_user\"");
+    expect(readme).toContain("Pass the product in `--goal`");
     expect(readme).toContain("node dist\\src\\cli.js discover");
-    expect(readme).toContain("node dist\\src\\cli.js replay-only --artifact artifacts\\sauce-demo-checkout.json");
+    expect(readme).toContain("--goal \"Add Sauce Labs Backpack to the cart and complete checkout.\" --inputs-file inputs.local.json");
     expect(readme).toContain("npm run demo:evidence");
     expect(readme).toContain("--human-handoff");
   });

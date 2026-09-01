@@ -5,5 +5,6 @@ evidence/*
 !evidence/demo/
 !evidence/demo/**
 .env
+inputs.local.json
 .serena/
 .claude/
