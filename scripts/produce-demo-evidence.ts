@@ -42,7 +42,6 @@ async function main(): Promise<void> {
       JSON.stringify(fileInputs())
     ],
     {
-      MINI_AUTO_EVIDENCE_DIR: scriptedDiscoveryDir,
       MINI_AUTO_MODEL_API_KEY: "scripted-engine",
       MINI_AUTO_PASSWORD: demoPassword()
     },
@@ -53,7 +52,8 @@ async function main(): Promise<void> {
         finalUrl: "https://www.saucedemo.com/checkout-complete.html",
         visibleText: "Thank you for your order!",
         locators: checkoutLocators()
-      })
+      }),
+      evidenceDir: scriptedDiscoveryDir
     }
   );
   await writeFile(path.join(scriptedDiscoveryDir, "result.json"), sanitize(scriptedDiscovery.stdout), "utf8");
@@ -77,8 +77,8 @@ async function main(): Promise<void> {
       "--inputs-file",
       replayInputs
     ],
-    { MINI_AUTO_EVIDENCE_DIR: replayDir, MINI_AUTO_PASSWORD: demoPassword() },
-    { handoffController: scriptedHandoffController() }
+    { MINI_AUTO_PASSWORD: demoPassword() },
+    { handoffController: scriptedHandoffController(), evidenceDir: replayDir }
   );
   await rm(replayInputs, { force: true });
   await writeFile(path.join(replayDir, "result.json"), sanitize(replay.stdout), "utf8");
@@ -98,7 +98,8 @@ async function main(): Promise<void> {
       "--inputs-file",
       badInputs
     ],
-    { MINI_AUTO_EVIDENCE_DIR: exceptionalDir, MINI_AUTO_PASSWORD: "wrong_password" }
+    { MINI_AUTO_PASSWORD: "wrong_password" },
+    { evidenceDir: exceptionalDir }
   );
   await rm(badInputs, { force: true });
   await writeFile(path.join(exceptionalDir, "result.json"), sanitize(exceptional.stdout), "utf8");
@@ -119,7 +120,8 @@ async function main(): Promise<void> {
       "--inputs-file",
       discoveryInputs
       ],
-      { ...process.env, MINI_AUTO_EVIDENCE_DIR: discoveryDir }
+      process.env,
+      { evidenceDir: discoveryDir }
     );
     await rm(discoveryInputs, { force: true });
     await writeFile(path.join(discoveryDir, "result.json"), sanitize(discovery.stdout), "utf8");

@@ -13,7 +13,6 @@ export type BrowserSurface = {
   interactiveControls?(): Promise<ObservedControl[]>;
   screenshot?(context: { evidenceDir: string; name: string }): Promise<string>;
   captureFailureEvidence?(context: FailureEvidenceContext): Promise<string[]>;
-  handoffAttachment?(): Promise<string[]>;
   close?(): Promise<void>;
 };
 

@@ -1,0 +1,51 @@
+{"time":"2026-09-05T03:36:38.402Z","event":"replay.started","artifactId":"discovered-sauce-demo-checkout","schemaVersion":"1.0.0","stepCount":13,"inputs":{"firstName":"Ada","lastName":"Lovelace","postalCode":"90210","password":"[REDACTED]","username":"standard_user","productName":"Sauce Labs Backpack"}}
+{"time":"2026-09-05T03:36:38.402Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-001","action":"navigate","risk":"safe"}
+{"time":"2026-09-05T03:36:38.402Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-001","owner":"automation"}
+{"time":"2026-09-05T03:36:38.750Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-001","action":"navigate"}
+{"time":"2026-09-05T03:36:38.750Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-002","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:38.750Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-002","owner":"automation"}
+{"time":"2026-09-05T03:36:38.831Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-002","action":"type"}
+{"time":"2026-09-05T03:36:38.831Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-003","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:38.831Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-003","owner":"automation"}
+{"time":"2026-09-05T03:36:38.843Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-003","action":"type"}
+{"time":"2026-09-05T03:36:38.843Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-004","action":"click","risk":"safe"}
+{"time":"2026-09-05T03:36:38.843Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-004","owner":"automation"}
+{"time":"2026-09-05T03:36:39.438Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-004","action":"click"}
+{"time":"2026-09-05T03:36:39.438Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-005","action":"click","risk":"safe"}
+{"time":"2026-09-05T03:36:39.438Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-005","owner":"automation"}
+{"time":"2026-09-05T03:36:39.564Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-005","action":"click"}
+{"time":"2026-09-05T03:36:39.564Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-006","action":"click","risk":"safe"}
+{"time":"2026-09-05T03:36:39.564Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-006","owner":"automation"}
+{"time":"2026-09-05T03:36:39.615Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-006","action":"click"}
+{"time":"2026-09-05T03:36:39.615Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-007","action":"click","risk":"safe"}
+{"time":"2026-09-05T03:36:39.615Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-007","owner":"automation"}
+{"time":"2026-09-05T03:36:39.650Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-007","action":"click"}
+{"time":"2026-09-05T03:36:39.650Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-008","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:39.650Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-008","owner":"automation"}
+{"time":"2026-09-05T03:36:39.659Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-008","action":"type"}
+{"time":"2026-09-05T03:36:39.659Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-009","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:39.659Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-009","owner":"automation"}
+{"time":"2026-09-05T03:36:39.672Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-009","action":"type"}
+{"time":"2026-09-05T03:36:39.672Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-010","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:39.672Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-010","owner":"automation"}
+{"time":"2026-09-05T03:36:39.684Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-010","action":"type"}
+{"time":"2026-09-05T03:36:39.684Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011","action":"click","risk":"risky"}
+{"time":"2026-09-05T03:36:39.684Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011","owner":"automation"}
+{"time":"2026-09-05T03:36:39.690Z","event":"ownership.changed","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011","from":"automation","to":"human"}
+{"time":"2026-09-05T03:36:39.690Z","event":"handoff.requested","id":"discovered-sauce-demo-checkout:step-011:1788579399688","artifactId":"discovered-sauce-demo-checkout","goal":"Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.","stepId":"step-011","reason":"unsafe_risky_action","expected":"Human review before click","observed":"URL: https://www.saucedemo.com/checkout-step-one.html\n\nOpen Menu\nSwag Labs\n1\nCheckout: Your Information\nCancel\nTwitter\nFacebook\nLinkedIn\n© 2026 Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy","evidence":["<repo>\\evidence\\demo\\deterministic-replay\\discovered-sauce-demo-checkout-step-011-handoff.txt"]}
+{"time":"2026-09-05T03:36:39.690Z","event":"handoff.human_activity","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011","description":"Scripted demo approved step-011."}
+{"time":"2026-09-05T03:36:39.690Z","event":"ownership.changed","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011","from":"human","to":"resumed_automation"}
+{"time":"2026-09-05T03:36:39.690Z","event":"handoff.resumed","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011"}
+{"time":"2026-09-05T03:36:39.743Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-011","action":"click"}
+{"time":"2026-09-05T03:36:39.743Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012","action":"click","risk":"risky"}
+{"time":"2026-09-05T03:36:39.743Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012","owner":"resumed_automation"}
+{"time":"2026-09-05T03:36:39.756Z","event":"ownership.changed","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012","from":"resumed_automation","to":"human"}
+{"time":"2026-09-05T03:36:39.756Z","event":"handoff.requested","id":"discovered-sauce-demo-checkout:step-012:1788579399753","artifactId":"discovered-sauce-demo-checkout","goal":"Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.","stepId":"step-012","reason":"unsafe_risky_action","expected":"Human review before click","observed":"URL: https://www.saucedemo.com/checkout-step-two.html\n\nOpen Menu\nSwag Labs\n1\nCheckout: Overview\nQTYDescription\n1\nSauce Labs Backpack\ncarry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\n$29.99\nPayment Information:\nSauceCard #31337\nShipping Information:\nFree Pony Express Delivery!\nPrice Total\nItem total: $29.99\nTax: $2.40\nTotal: $32.39\nCancel\nFinish\nTwitter\nFacebook\nLinkedIn\n© 2026 Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy","evidence":["<repo>\\evidence\\demo\\deterministic-replay\\discovered-sauce-demo-checkout-step-012-handoff.txt"]}
+{"time":"2026-09-05T03:36:39.756Z","event":"handoff.human_activity","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012","description":"Scripted demo approved step-012."}
+{"time":"2026-09-05T03:36:39.756Z","event":"ownership.changed","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012","from":"human","to":"resumed_automation"}
+{"time":"2026-09-05T03:36:39.756Z","event":"handoff.resumed","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012"}
+{"time":"2026-09-05T03:36:39.784Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-012","action":"click"}
+{"time":"2026-09-05T03:36:39.784Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-013","action":"extract","risk":"safe"}
+{"time":"2026-09-05T03:36:39.784Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-013","owner":"resumed_automation"}
+{"time":"2026-09-05T03:36:39.789Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-013","action":"extract"}
+{"time":"2026-09-05T03:36:39.792Z","event":"replay.completed","result":{"ok":true,"kind":"success","artifactId":"discovered-sauce-demo-checkout","outputs":{"value":"Thank you for your order!","resultKind":"success"},"evidence":["<repo>\\evidence\\demo\\deterministic-replay\\replay-2026-09-05T03-36-37-256Z.jsonl"]}}

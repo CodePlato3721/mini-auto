@@ -9,9 +9,6 @@ export function createTerminalHandoffController(
 ): HumanHandoffController {
   return {
     async waitForResume(context) {
-      const attachment = context.request.attachment?.length
-        ? ["", "Attach to live session:", ...context.request.attachment]
-        : ["", "Attach to live session: no attach endpoint was provided by this browser surface."];
       output.write(
         [
           "",
@@ -21,10 +18,11 @@ export function createTerminalHandoffController(
           `Reason: ${context.request.reason}`,
           `Observed: ${context.request.observed}`,
           `Evidence: ${context.request.evidence.join(", ")}`,
-          ...attachment,
+          "",
+          "Use the visible Chromium window to inspect or fix the live session.",
           "",
           "Operator choices:",
-          "- Fix the issue in the attached session, then type: resume",
+          "- Fix the issue in the visible browser, then type: resume",
           "- If it cannot be fixed, type: fail <reason>",
           ""
         ].join("\n")

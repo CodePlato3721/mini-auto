@@ -7,12 +7,12 @@
     "replay": {
       "ok": true,
       "kind": "known_business_outcome",
-      "artifactId": "sauce-demo-checkout",
+      "artifactId": "discovered-sauce-demo-checkout",
       "outcome": "invalid_login",
-      "stepId": "submit-login",
+      "stepId": "step-004",
       "observed": "Swag Labs\nEpic sadface: Username and password do not match any user in this service\nAccepted usernames are:\nstandard_user\nlocked_out_user\nproblem_user\nperformance_glitch_user\nerror_user\nvisual_user\n\nPassword for all users:\n[REDACTED]",
       "evidence": [
-        "<repo>\\evidence\\demo\\exceptional-invalid-login\\replay-2026-09-01T03-54-40-048Z.jsonl"
+        "<repo>\\evidence\\demo\\exceptional-invalid-login\\replay-2026-09-05T03-36-40-034Z.jsonl"
       ]
     }
   }

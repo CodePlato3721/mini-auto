@@ -1,0 +1,13 @@
+{"time":"2026-09-05T03:36:40.420Z","event":"replay.started","artifactId":"discovered-sauce-demo-checkout","schemaVersion":"1.0.0","stepCount":13,"inputs":{"firstName":"Ada","lastName":"Lovelace","postalCode":"90210","password":"[REDACTED]","username":"standard_user","productName":"Sauce Labs Backpack"}}
+{"time":"2026-09-05T03:36:40.420Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-001","action":"navigate","risk":"safe"}
+{"time":"2026-09-05T03:36:40.420Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-001","owner":"automation"}
+{"time":"2026-09-05T03:36:40.736Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-001","action":"navigate"}
+{"time":"2026-09-05T03:36:40.736Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-002","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:40.736Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-002","owner":"automation"}
+{"time":"2026-09-05T03:36:40.783Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-002","action":"type"}
+{"time":"2026-09-05T03:36:40.783Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-003","action":"type","risk":"safe"}
+{"time":"2026-09-05T03:36:40.783Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-003","owner":"automation"}
+{"time":"2026-09-05T03:36:40.793Z","event":"step.succeeded","artifactId":"discovered-sauce-demo-checkout","stepId":"step-003","action":"type"}
+{"time":"2026-09-05T03:36:40.793Z","event":"step.started","artifactId":"discovered-sauce-demo-checkout","stepId":"step-004","action":"click","risk":"safe"}
+{"time":"2026-09-05T03:36:40.793Z","event":"ownership.state","artifactId":"discovered-sauce-demo-checkout","stepId":"step-004","owner":"automation"}
+{"time":"2026-09-05T03:36:40.845Z","event":"replay.completed","result":{"ok":true,"kind":"known_business_outcome","artifactId":"discovered-sauce-demo-checkout","outcome":"invalid_login","stepId":"step-004","observed":"Swag Labs\nEpic sadface: Username and password do not match any user in this service\nAccepted usernames are:\nstandard_user\nlocked_out_user\nproblem_user\nperformance_glitch_user\nerror_user\nvisual_user\n\nPassword for all users:\n[REDACTED]","evidence":["<repo>\\evidence\\demo\\exceptional-invalid-login\\replay-2026-09-05T03-36-40-034Z.jsonl"]}}

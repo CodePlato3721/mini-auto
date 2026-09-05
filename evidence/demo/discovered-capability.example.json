@@ -3,29 +3,11 @@
   "metadata": {
     "id": "discovered-sauce-demo-checkout",
     "name": "Discovered Sauce Demo Checkout",
-    "description": "Log in to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
-    "createdAt": "2026-09-01T03:54:36.214Z",
+    "description": "Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
+    "createdAt": "2026-09-05T03:36:37.227Z",
     "source": "llm-discovery"
   },
   "inputs": [
-    {
-      "name": "username",
-      "type": "string",
-      "required": true,
-      "sensitive": false
-    },
-    {
-      "name": "password",
-      "type": "string",
-      "required": true,
-      "sensitive": true
-    },
-    {
-      "name": "productName",
-      "type": "string",
-      "required": true,
-      "sensitive": false
-    },
     {
       "name": "firstName",
       "type": "string",
@@ -40,6 +22,24 @@
     },
     {
       "name": "postalCode",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "required": true,
+      "sensitive": true
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    },
+    {
+      "name": "productName",
       "type": "string",
       "required": true,
       "sensitive": false
@@ -321,7 +321,7 @@
       },
       "inputBindings": {},
       "outputBindings": {},
-      "risk": "safe"
+      "risk": "risky"
     },
     {
       "id": "step-015",

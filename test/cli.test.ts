@@ -65,10 +65,11 @@ describe("CLI scaffold", () => {
 
     const { result, stdout, exitCode } = await runCli(
       ["discover", "--goal", "Open Sauce Demo", "--target-url", "https://www.saucedemo.com/", "--inputs-file", inputsPath],
-      { MINI_AUTO_EVIDENCE_DIR: evidenceDir, MINI_AUTO_MODEL_API_KEY: "test-key" },
+      { MINI_AUTO_MODEL_API_KEY: "test-key" },
       {
         decisionEngine,
-        discoverySurface: createMemorySurface({ visibleText: "Ready" })
+        discoverySurface: createMemorySurface({ visibleText: "Ready" }),
+        evidenceDir
       }
     );
 
@@ -135,11 +136,12 @@ describe("CLI scaffold", () => {
 
     const { result, stdout, exitCode } = await runCli(
       ["replay-only", "--artifact", artifactPath, "--inputs-file", inputsPath],
-      { MINI_AUTO_EVIDENCE_DIR: evidenceDir },
+      {},
       {
         replaySurface: createMemorySurface({
           visibleText: "Ready"
-        })
+        }),
+        evidenceDir
       }
     );
 
@@ -254,8 +256,8 @@ describe("CLI scaffold", () => {
         "--inputs-file",
         inputsPath
       ],
-      { MINI_AUTO_EVIDENCE_DIR: evidenceDir, MINI_AUTO_PASSWORD: "secret_sauce" },
-      { replaySurface: surface }
+      { MINI_AUTO_PASSWORD: "secret_sauce" },
+      { replaySurface: surface, evidenceDir }
     );
 
     expect(exitCode).toBe(0);
@@ -275,7 +277,8 @@ describe("CLI scaffold", () => {
     const evidenceDir = await tempEvidenceDir();
     const { result, stdout, exitCode } = await runCli(
       ["replay", "--artifact", path.join(evidenceDir, "missing.json")],
-      { MINI_AUTO_EVIDENCE_DIR: evidenceDir }
+      {},
+      { evidenceDir }
     );
 
     expect(exitCode).toBe(1);
@@ -348,12 +351,13 @@ describe("CLI scaffold", () => {
 
     const { result, stdout, exitCode } = await runCli(
       ["replay", "--artifact", artifactPath, "--inputs-json", "{\"username\":\"standard_user\"}"],
-      { MINI_AUTO_EVIDENCE_DIR: evidenceDir },
+      {},
       {
         replaySurface: createMemorySurface({
           visibleText: "Ready"
         }),
-        handoffController
+        handoffController,
+        evidenceDir
       }
     );
 

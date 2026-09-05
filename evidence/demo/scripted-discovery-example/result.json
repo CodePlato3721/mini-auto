@@ -13,7 +13,7 @@
         "recordedStepCount": 15
       },
       "evidence": [
-        "<repo>\\evidence\\demo\\scripted-discovery-example\\discovery-2026-09-01T03-54-36-197Z.jsonl"
+        "<repo>\\evidence\\demo\\scripted-discovery-example\\discovery-2026-09-05T03-36-37-210Z.jsonl"
       ],
       "artifactPath": "<repo>\\evidence\\demo\\scripted-discovery-example\\discovered-capability.json",
       "message": "Discovery completed."

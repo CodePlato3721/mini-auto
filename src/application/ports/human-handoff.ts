@@ -11,7 +11,6 @@ export type HumanInterventionRequest = {
   expected: string;
   observed: string;
   evidence: string[];
-  attachment?: string[];
 };
 
 export type HumanHandoffActivity = {

@@ -38,6 +38,8 @@ const COMMANDS: Record<CommandName, string> = {
   "replay-only": "Alias for replay, intended for demos without live model calls."
 };
 
+const DEFAULT_EVIDENCE_DIR = "evidence";
+
 const HELP_TEXT = `mini-auto
 
 Usage:
@@ -51,10 +53,8 @@ Commands:
   replay-only  ${COMMANDS["replay-only"]}
 
 Environment:
-  MINI_AUTO_EVIDENCE_DIR   Directory for evidence output. Defaults to ./evidence.
   MINI_AUTO_MODEL_API_KEY  Required for discover unless --dry-run is set.
   MINI_AUTO_PASSWORD       Optional password input fallback when inputs omit password.
-  MINI_AUTO_DEBUG_PORT     Optional Chromium attach port for replay handoff. Defaults to 9222.
 `;
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -94,7 +94,7 @@ function readStringFlag(flags: Map<string, string | boolean>, name: string): str
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult {
+function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv, evidenceDir = DEFAULT_EVIDENCE_DIR): CliResult {
   if (!parsed.command || parsed.flags.has("help") || parsed.flags.has("h")) {
     return {
       ok: true,
@@ -112,8 +112,6 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
       errors: [`Expected one of: ${Object.keys(COMMANDS).join(", ")}`]
     };
   }
-
-  const evidenceDir = env.MINI_AUTO_EVIDENCE_DIR?.trim() || "evidence";
 
   if (parsed.command === "discover") {
     const goal = readStringFlag(parsed.flags, "goal");
@@ -233,6 +231,7 @@ export async function runCli(
     discoverySurface?: BrowserSurface;
     decisionEngine?: DecisionEngine;
     handoffController?: HumanHandoffController;
+    evidenceDir?: string;
   } = {}
 ): Promise<{ result: CliResult; stdout: string; exitCode: number }> {
   const effectiveEnv = mergeDotEnv(env ?? process.env, env === undefined);
@@ -240,7 +239,7 @@ export async function runCli(
   let result: CliResult;
 
   try {
-    result = validateCommand(parsed, effectiveEnv);
+    result = validateCommand(parsed, effectiveEnv, deps.evidenceDir);
   } catch (error) {
     const command = parsed.command && isCommandName(parsed.command) ? parsed.command : undefined;
     result = {
@@ -300,8 +299,7 @@ export async function runCli(
           ? undefined
           : () =>
               createPlaywrightSurface({
-                headless: false,
-                remoteDebuggingPort: readDebugPort(effectiveEnv)
+                headless: false
               }),
         handoff: deps.handoffController ?? createTerminalHandoffController()
       });
@@ -393,20 +391,6 @@ function unquoteEnvValue(value: string): string {
   }
 
   return value;
-}
-
-function readDebugPort(env: Record<string, string | undefined>): number {
-  const raw = env.MINI_AUTO_DEBUG_PORT?.trim();
-  if (!raw) {
-    return 9222;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-    return 9222;
-  }
-
-  return parsed;
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

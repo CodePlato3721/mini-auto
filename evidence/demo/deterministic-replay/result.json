@@ -7,15 +7,13 @@
     "replay": {
       "ok": true,
       "kind": "success",
-      "artifactId": "sauce-demo-checkout",
+      "artifactId": "discovered-sauce-demo-checkout",
       "outputs": {
-        "orderedItem": "Sauce Labs Backpack",
-        "totalPrice": "Total: $32.39",
-        "confirmationMessage": "Thank you for your order!",
+        "value": "Thank you for your order!",
         "resultKind": "success"
       },
       "evidence": [
-        "<repo>\\evidence\\demo\\deterministic-replay\\replay-2026-09-01T03-54-36-245Z.jsonl"
+        "<repo>\\evidence\\demo\\deterministic-replay\\replay-2026-09-05T03-36-37-256Z.jsonl"
       ]
     }
   }

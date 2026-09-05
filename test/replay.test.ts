@@ -466,7 +466,6 @@ describe("deterministic replay", () => {
         "testId:total-label": "Total: $32.39"
       }
     });
-    surface.handoffAttachment = async () => ["Attach at http://127.0.0.1:9222"];
     let request: HumanInterventionRequest | undefined;
     const handoff: HumanHandoffController = {
       async waitForResume(context) {
@@ -508,7 +507,6 @@ describe("deterministic replay", () => {
     expect(request?.observed).toContain("URL:");
     expect(request?.observed).not.toContain("secret_sauce");
     expect(request?.evidence[0]).toContain("manual-inventory-check-handoff");
-    expect(request?.attachment).toContain("Attach at http://127.0.0.1:9222");
     expect(surface.calls).toContainEqual({ type: "wait", value: "25" });
 
     const evidence = await readFile(result.evidence[0], "utf8");

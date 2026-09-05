@@ -11,19 +11,16 @@ import type {
 } from "../../application/ports/browser-surface.js";
 import type { LocatorCandidate } from "../../domain/contracts.js";
 
-export async function createPlaywrightSurface(options: { headless?: boolean; remoteDebuggingPort?: number } = {}): Promise<BrowserSurface> {
-  const args =
-    options.remoteDebuggingPort === undefined ? [] : [`--remote-debugging-port=${options.remoteDebuggingPort}`];
-  const browser = await chromium.launch({ headless: options.headless ?? true, args });
+export async function createPlaywrightSurface(options: { headless?: boolean } = {}): Promise<BrowserSurface> {
+  const browser = await chromium.launch({ headless: options.headless ?? true });
   const page = await browser.newPage();
-  return new PlaywrightSurface(browser, page, options.remoteDebuggingPort);
+  return new PlaywrightSurface(browser, page);
 }
 
 class PlaywrightSurface implements BrowserSurface {
   constructor(
     private readonly browser: Browser,
-    private readonly page: Page,
-    private readonly remoteDebuggingPort?: number
+    private readonly page: Page
   ) {}
 
   async navigate(url: string): Promise<void> {
@@ -103,17 +100,6 @@ class PlaywrightSurface implements BrowserSurface {
     await this.page.screenshot({ path: screenshotPath, fullPage: true });
     await writeFile(snapshotPath, context.redact(await this.page.content()), "utf8");
     return [screenshotPath, snapshotPath];
-  }
-
-  async handoffAttachment(): Promise<string[]> {
-    if (this.remoteDebuggingPort === undefined) {
-      return [];
-    }
-
-    return [
-      `Open Chromium DevTools at http://127.0.0.1:${this.remoteDebuggingPort}`,
-      `Attach with CDP at http://127.0.0.1:${this.remoteDebuggingPort}/json/version`
-    ];
   }
 
   private toLocator(locator: ResolvedLocator): Locator {

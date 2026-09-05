@@ -6,7 +6,7 @@ import {
 } from "../../application/discovery.js";
 
 export function createOpenAiDecisionEngine(env: NodeJS.ProcessEnv = process.env): DecisionEngine {
-  return new OpenAiDecisionEngine(env.MINI_AUTO_MODEL_API_KEY, env.MINI_AUTO_MODEL ?? "gpt-5-mini");
+  return new OpenAiDecisionEngine(env.MINI_AUTO_MODEL_API_KEY);
 }
 
 class OpenAiDecisionEngine implements DecisionEngine {

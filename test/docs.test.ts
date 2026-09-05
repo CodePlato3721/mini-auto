@@ -18,9 +18,12 @@ describe("project documentation", () => {
     expect(readme).toContain("Handoff is enabled by default for replay");
     expect(readme).not.toContain("--human-handoff");
     expect(readme).toContain("fail <reason>");
-    expect(readme).toContain("MINI_AUTO_DEBUG_PORT");
-    expect(readme).toContain("set MINI_AUTO_DEBUG_PORT=9222");
-    expect(readme).toContain("The CLI automatically loads it when present.");
+    expect(readme).not.toContain("MINI_AUTO_EVIDENCE_DIR");
+    expect(readme).not.toContain("MINI_AUTO_DEBUG_PORT");
+    expect(readme).not.toContain("MINI_AUTO_MODEL=");
+    expect(readme).toContain("Evidence is always written to `./evidence`.");
+    expect(readme).toContain("Live LLM discovery always uses `gpt-5-mini`.");
+    expect(readme).toContain("The CLI also loads a local `.env` file from the repo root when present.");
     expect(readme).toContain("It launches a headed Chromium session");
     expect(readme).toContain("resume: <what changed>");
     expect(readme).not.toContain("--json");

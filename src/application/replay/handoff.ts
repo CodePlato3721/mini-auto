@@ -30,7 +30,6 @@ export async function requestHumanHandoff(args: {
   }
 
   const evidence = await captureInterventionEvidence(args);
-  const attachment = await args.surface.handoffAttachment?.();
   const request: HumanInterventionRequest = {
     id: `${args.artifact.metadata.id}:${args.step.id}:${Date.now()}`,
     artifactId: args.artifact.metadata.id,
@@ -39,8 +38,7 @@ export async function requestHumanHandoff(args: {
     reason: args.reason,
     expected: args.expected,
     observed: args.redactor(await describeSurface(args.surface)),
-    evidence,
-    attachment
+    evidence
   };
 
   args.logger.append("ownership.changed", {
