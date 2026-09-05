@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { discoverCapability, type DecisionEngine } from "./discovery.js";
-import {
-  createTerminalHandoffController,
-  replayCapabilityFromFile,
-  type BrowserSurface,
-  type HumanHandoffController
-} from "./replay.js";
+import { discoverCapability, type DecisionEngine } from "../application/discovery.js";
+import { enrichInputsFromGoal } from "../application/goal-inputs.js";
+import type { BrowserSurface } from "../application/ports/browser-surface.js";
+import type { HumanHandoffController } from "../application/ports/human-handoff.js";
+import { replayCapabilityFromFile } from "../application/replay.js";
+import { createPlaywrightSurface } from "../infrastructure/browser/playwright-surface.js";
+import { createFileEvidenceStore } from "../infrastructure/evidence/file-evidence-store.js";
+import { createOpenAiDecisionEngine } from "../infrastructure/model/openai-decision-engine.js";
+import { createTerminalHandoffController } from "./terminal-handoff.js";
 
 type CommandName = "discover" | "replay" | "replay-only";
 type ResultKind = "success" | "configuration_error" | "hard_failure" | "known_business_outcome" | "recoverable_condition";
@@ -40,9 +41,9 @@ const COMMANDS: Record<CommandName, string> = {
 const HELP_TEXT = `mini-auto
 
 Usage:
-  mini-auto discover --goal <text> --target-url <url> [--inputs-json <json> | --inputs-file <path>] [--dry-run] [--json]
-  mini-auto replay --artifact <path> [--goal <text>] [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
-  mini-auto replay-only --artifact <path> [--goal <text>] [--inputs-json <json> | --inputs-file <path>] [--human-handoff] [--json]
+  mini-auto discover --goal <text> --target-url <url> [--inputs-json <json> | --inputs-file <path>] [--dry-run]
+  mini-auto replay --artifact <path> [--goal <text>] [--inputs-json <json> | --inputs-file <path>]
+  mini-auto replay-only --artifact <path> [--goal <text>] [--inputs-json <json> | --inputs-file <path>]
 
 Commands:
   discover     ${COMMANDS.discover}
@@ -53,6 +54,7 @@ Environment:
   MINI_AUTO_EVIDENCE_DIR   Directory for evidence output. Defaults to ./evidence.
   MINI_AUTO_MODEL_API_KEY  Required for discover unless --dry-run is set.
   MINI_AUTO_PASSWORD       Optional password input fallback when inputs omit password.
+  MINI_AUTO_DEBUG_PORT     Optional Chromium attach port for replay handoff. Defaults to 9222.
 `;
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -166,7 +168,7 @@ function validateCommand(parsed: ParsedArgs, env: NodeJS.ProcessEnv): CliResult 
       evidenceDir,
       inputs: readInputs(parsed.flags, env, { goal }),
       mode: parsed.command === "replay-only" ? "replay-only" : "replay",
-      humanHandoff: parsed.flags.has("human-handoff")
+      humanHandoff: true
     }
   };
 }
@@ -176,26 +178,7 @@ function readInputs(
   env: NodeJS.ProcessEnv,
   options: { goal?: string } = {}
 ): Record<string, unknown> {
-  const inputs = readInputsJson(flags);
-  if (inputs.password === undefined && env.MINI_AUTO_PASSWORD) {
-    inputs.password = env.MINI_AUTO_PASSWORD;
-  }
-
-  if (inputs.username === undefined && options.goal) {
-    const username = inferSauceDemoUsername(options.goal);
-    if (username) {
-      inputs.username = username;
-    }
-  }
-
-  if (inputs.productName === undefined && options.goal) {
-    const productName = inferSauceDemoProductName(options.goal);
-    if (productName) {
-      inputs.productName = productName;
-    }
-  }
-
-  return inputs;
+  return enrichInputsFromGoal({ inputs: readInputsJson(flags), env, goal: options.goal });
 }
 
 function readInputsJson(flags: Map<string, string | boolean>): Record<string, unknown> {
@@ -215,32 +198,6 @@ function readInputsJson(flags: Map<string, string | boolean>): Record<string, un
   }
 
   return parseInputsJson(raw);
-}
-
-function inferSauceDemoUsername(goal: string): string | undefined {
-  const knownUsernames = [
-    "standard_user",
-    "locked_out_user",
-    "problem_user",
-    "performance_glitch_user",
-    "error_user",
-    "visual_user"
-  ];
-  const normalizedGoal = goal.toLowerCase();
-  return knownUsernames.find((username) => normalizedGoal.includes(username.toLowerCase()));
-}
-
-function inferSauceDemoProductName(goal: string): string | undefined {
-  const knownProducts = [
-    "Sauce Labs Backpack",
-    "Sauce Labs Bike Light",
-    "Sauce Labs Bolt T-Shirt",
-    "Sauce Labs Fleece Jacket",
-    "Sauce Labs Onesie",
-    "Test.allTheThings() T-Shirt (Red)"
-  ];
-  const normalizedGoal = goal.toLowerCase();
-  return knownProducts.find((product) => normalizedGoal.includes(product.toLowerCase()));
 }
 
 function parseInputsJson(raw: string): Record<string, unknown> {
@@ -264,25 +221,13 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function formatResult(result: CliResult, asJson: boolean): string {
-  if (asJson) {
-    return JSON.stringify(result, null, 2);
-  }
-
-  if (result.ok && result.message === HELP_TEXT) {
-    return HELP_TEXT;
-  }
-
-  const lines = [`${result.ok ? "OK" : "ERROR"}: ${result.message}`];
-  for (const error of result.errors ?? []) {
-    lines.push(`- ${error}`);
-  }
-  return lines.join("\n");
+function formatResult(result: CliResult): string {
+  return JSON.stringify(result, null, 2);
 }
 
 export async function runCli(
   argv: string[],
-  env: NodeJS.ProcessEnv = process.env,
+  env?: NodeJS.ProcessEnv,
   deps: {
     replaySurface?: BrowserSurface;
     discoverySurface?: BrowserSurface;
@@ -290,12 +235,12 @@ export async function runCli(
     handoffController?: HumanHandoffController;
   } = {}
 ): Promise<{ result: CliResult; stdout: string; exitCode: number }> {
+  const effectiveEnv = mergeDotEnv(env ?? process.env, env === undefined);
   const parsed = parseArgs(argv);
-  const asJson = parsed.flags.has("json");
   let result: CliResult;
 
   try {
-    result = validateCommand(parsed, env);
+    result = validateCommand(parsed, effectiveEnv);
   } catch (error) {
     const command = parsed.command && isCommandName(parsed.command) ? parsed.command : undefined;
     result = {
@@ -307,9 +252,7 @@ export async function runCli(
     };
   }
 
-  if (result.ok && result.data && typeof result.data.evidenceDir === "string") {
-    await mkdir(path.resolve(result.data.evidenceDir), { recursive: true });
-  }
+  const evidenceStore = createFileEvidenceStore();
 
   if (
     result.ok &&
@@ -324,9 +267,11 @@ export async function runCli(
       goal: result.data.goal,
       targetUrl: result.data.targetUrl,
       evidenceDir: result.data.evidenceDir,
+      evidenceStore,
       inputs: readRecord(result.data.inputs),
       surface: deps.discoverySurface,
-      decisionEngine: deps.decisionEngine
+      surfaceFactory: deps.discoverySurface ? undefined : () => createPlaywrightSurface(),
+      decisionEngine: deps.decisionEngine ?? createOpenAiDecisionEngine(effectiveEnv)
     });
     result = {
       ok: discoveryResult.ok,
@@ -348,12 +293,17 @@ export async function runCli(
       const replayResult = await replayCapabilityFromFile({
         artifactPath: result.data.artifact,
         evidenceDir: result.data.evidenceDir,
+        evidenceStore,
         inputs: readRecord(result.data.inputs),
         surface: deps.replaySurface,
-        handoff: result.data.humanHandoff === true ? deps.handoffController ?? createTerminalHandoffController() : undefined,
-        browser: {
-          headless: result.data.humanHandoff !== true
-        }
+        surfaceFactory: deps.replaySurface
+          ? undefined
+          : () =>
+              createPlaywrightSurface({
+                headless: false,
+                remoteDebuggingPort: readDebugPort(effectiveEnv)
+              }),
+        handoff: deps.handoffController ?? createTerminalHandoffController()
       });
       result = {
         ok: replayResult.ok,
@@ -375,9 +325,88 @@ export async function runCli(
 
   return {
     result,
-    stdout: formatResult(result, asJson),
+    stdout: formatResult(result),
     exitCode: result.ok ? 0 : 1
   };
+}
+
+function mergeDotEnv(env: NodeJS.ProcessEnv, loadDotEnv: boolean): NodeJS.ProcessEnv {
+  if (!loadDotEnv) {
+    return env;
+  }
+
+  if (env.MINI_AUTO_DOTENV === "0") {
+    return env;
+  }
+
+  const fileValues = readDotEnvFile(path.resolve(".env"));
+  if (Object.keys(fileValues).length === 0) {
+    return env;
+  }
+
+  return { ...fileValues, ...env };
+}
+
+function readDotEnvFile(filePath: string): Record<string, string> {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? (error as { code?: unknown }).code : undefined;
+    if (code === "ENOENT") {
+      return {};
+    }
+    throw error;
+  }
+
+  const values: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const assignment = trimmed.startsWith("export ") ? trimmed.slice("export ".length).trim() : trimmed;
+    const separator = assignment.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = assignment.slice(0, separator).trim();
+    const value = assignment.slice(separator + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      continue;
+    }
+
+    values[key] = unquoteEnvValue(value);
+  }
+
+  return values;
+}
+
+function unquoteEnvValue(value: string): string {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1);
+  }
+
+  return value;
+}
+
+function readDebugPort(env: Record<string, string | undefined>): number {
+  const raw = env.MINI_AUTO_DEBUG_PORT?.trim();
+  if (!raw) {
+    return 9222;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    return 9222;
+  }
+
+  return parsed;
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

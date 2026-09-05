@@ -3,15 +3,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { CapabilityArtifactInput } from "../src/contracts.js";
-import {
-  createMemorySurface,
-  replayCapability,
-  type HumanHandoffController,
-  type HumanInterventionRequest
-} from "../src/replay.js";
+import type { CapabilityArtifactInput } from "../src/domain/contracts.js";
+import type { HumanHandoffController, HumanInterventionRequest } from "../src/application/ports/human-handoff.js";
+import { replayCapability } from "../src/application/replay.js";
+import { createMemorySurface } from "../src/infrastructure/browser/memory-surface.js";
+import { createFileEvidenceStore } from "../src/infrastructure/evidence/file-evidence-store.js";
 
 const tempDirs: string[] = [];
+const evidenceStore = createFileEvidenceStore();
 
 async function tempEvidenceDir(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "mini-auto-replay-"));
@@ -156,6 +155,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir,
+      evidenceStore,
       surface
     });
 
@@ -195,6 +195,7 @@ describe("deterministic replay", () => {
       artifactInput: { schemaVersion: "bad" },
       inputs: {},
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface: createMemorySurface()
     });
 
@@ -212,6 +213,7 @@ describe("deterministic replay", () => {
       artifactInput: checkoutArtifact(),
       inputs: {},
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface
     });
 
@@ -239,6 +241,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir,
+      evidenceStore,
       surface: createMemorySurface({
         visibleText: "Inventory page with leaked secret_sauce value",
         locators: {
@@ -278,6 +281,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface: createMemorySurface({
         visibleText: "Inventory page",
         locators: {
@@ -308,6 +312,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface: createMemorySurface({
         finalUrl: "https://evil.example/phish",
         visibleText: "Moved away",
@@ -339,6 +344,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface: createMemorySurface({
         visibleText: "Inventory page",
         locators: {
@@ -369,6 +375,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface: createMemorySurface({
         initialUrl: "https://www.saucedemo.com/",
         visibleText: "Epic sadface: Username and password do not match any user in this service\nPassword for all users: secret_sauce",
@@ -406,6 +413,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir,
+      evidenceStore,
       surface: createMemorySurface({
         initialUrl: "about:blank",
         finalUrl: "https://www.saucedemo.com/checkout-complete.html",
@@ -458,6 +466,7 @@ describe("deterministic replay", () => {
         "testId:total-label": "Total: $32.39"
       }
     });
+    surface.handoffAttachment = async () => ["Attach at http://127.0.0.1:9222"];
     let request: HumanInterventionRequest | undefined;
     const handoff: HumanHandoffController = {
       async waitForResume(context) {
@@ -483,6 +492,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir,
+      evidenceStore,
       surface,
       handoff
     });
@@ -498,6 +508,7 @@ describe("deterministic replay", () => {
     expect(request?.observed).toContain("URL:");
     expect(request?.observed).not.toContain("secret_sauce");
     expect(request?.evidence[0]).toContain("manual-inventory-check-handoff");
+    expect(request?.attachment).toContain("Attach at http://127.0.0.1:9222");
     expect(surface.calls).toContainEqual({ type: "wait", value: "25" });
 
     const evidence = await readFile(result.evidence[0], "utf8");
@@ -508,6 +519,73 @@ describe("deterministic replay", () => {
     expect(evidence).toContain('"event":"handoff.human_activity"');
     expect(evidence).toContain('"event":"handoff.resumed"');
     expect(evidence).not.toContain("secret_sauce");
+  });
+
+  it("escalates a stuck locator miss to human handoff and retries the same step after resume", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifact = checkoutArtifact();
+    let humanFixedState = false;
+    const surface = createMemorySurface({
+      initialUrl: "about:blank",
+      finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+      visibleText: "Checkout page without item details.\nThank you for your order!",
+      locators: {
+        "testId:username": "",
+        "testId:password": "",
+        "testId:login-button": "",
+        "relativeText:Sauce Labs Backpack >> Add to cart": "",
+        "testId:total-label": "Total: $53.99"
+      }
+    });
+    const originalHasLocator = surface.hasLocator;
+    surface.hasLocator = async (candidate) => {
+      if (candidate.value === "inventory-item-name") {
+        return humanFixedState;
+      }
+      return originalHasLocator(candidate);
+    };
+    surface.extractText = async (locator) => {
+      surface.calls.push({ type: "extract", locator: locator.key, stepId: locator.stepId });
+      return locator.key === "testId:inventory-item-name" ? "Sauce Labs Fleece Jacket" : "Total: $53.99";
+    };
+    const handoff: HumanHandoffController = {
+      async waitForResume(context) {
+        expect(context.request).toMatchObject({
+          stepId: "extract-item",
+          reason: "stuck_replay_state",
+          expected: "At least one locator candidate should resolve"
+        });
+        humanFixedState = true;
+        return {
+          signal: "resume",
+          activities: [{ description: "Human restored the checkout item details." }]
+        };
+      }
+    };
+
+    const result = await replayCapability({
+      artifactInput: artifact,
+      inputs: {
+        username: "problem_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir,
+      evidenceStore,
+      surface,
+      handoff
+    });
+
+    expect(result.kind).toBe("success");
+    expect(surface.calls.filter((call) => call.stepId === "extract-item" && call.type === "extract")).toHaveLength(1);
+    const evidence = await readFile(result.evidence[0], "utf8");
+    expect(evidence).toContain('"event":"handoff.requested"');
+    expect(evidence).toContain('"reason":"stuck_replay_state"');
+    expect(evidence).toContain('"event":"handoff.retrying_step"');
+    expect(evidence).toContain('"event":"handoff.resumed"');
   });
 
   it("requires handoff before risky actions and then resumes automated ownership", async () => {
@@ -552,6 +630,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir,
+      evidenceStore,
       surface,
       handoff
     });
@@ -592,6 +671,7 @@ describe("deterministic replay", () => {
         postalCode: "90210"
       },
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       surface: createMemorySurface({
         visibleText: "Manual help needed.",
         locators: {
@@ -610,5 +690,63 @@ describe("deterministic replay", () => {
       throw new Error(`Expected hard failure, received ${result.kind}`);
     }
     expect(result.observed).toContain("artifact_requested_handoff");
+  });
+
+  it("stops with a hard failure when the human cannot resolve handoff", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const artifact = checkoutArtifact();
+    artifact.policy.allowedActions = [...artifact.policy.allowedActions, "handoff"];
+    artifact.steps.splice(1, 0, {
+      id: "manual-stop",
+      action: "handoff",
+      description: "Ask a human to resolve a stuck state.",
+      risk: "safe"
+    });
+    const handoff: HumanHandoffController = {
+      async waitForResume() {
+        return {
+          signal: "fail",
+          reason: "checkout account is locked",
+          activities: [{ description: "Human inspected the session and could not continue." }]
+        };
+      }
+    };
+
+    const result = await replayCapability({
+      artifactInput: artifact,
+      inputs: {
+        username: "standard_user",
+        password: "secret_sauce",
+        productName: "Sauce Labs Backpack",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        postalCode: "90210"
+      },
+      evidenceDir,
+      evidenceStore,
+      surface: createMemorySurface({
+        visibleText: "Account locked.",
+        locators: {
+          "testId:username": ""
+        }
+      }),
+      handoff
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "hard_failure",
+      stepId: "manual-stop",
+      expected: "Human intervention resolved stuck replay state",
+      observed: "Operator could not resolve handoff: checkout account is locked"
+    });
+    if (result.kind !== "hard_failure") {
+      throw new Error(`Expected hard failure, received ${result.kind}`);
+    }
+    const evidence = await readFile(result.evidence[0], "utf8");
+    expect(evidence).toContain('"event":"handoff.failed"');
+    expect(evidence).toContain("checkout account is locked");
+    expect(evidence).toContain('"event":"handoff.human_activity"');
+    expect(evidence).not.toContain('"event":"handoff.resumed"');
   });
 });

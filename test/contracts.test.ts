@@ -10,7 +10,7 @@ import {
   redactInvocationInputs,
   successReplayResult,
   type CapabilityArtifactInput
-} from "../src/contracts.js";
+} from "../src/domain/contracts.js";
 
 function validArtifact(): CapabilityArtifactInput {
   return {
@@ -73,7 +73,9 @@ describe("capability artifact contracts", () => {
     const parsed = parseCapabilityArtifact(artifact);
 
     expect(parsed.ok).toBe(true);
-    expect(parsed.artifact?.metadata.id).toBe("sauce-demo-checkout");
+    expect(parsed.artifact?.metadata.id).toContain("sauce-demo-checkout");
+    expect(parsed.artifact?.policy.riskyActionHandling).toBe("require_handoff");
+    expect(parsed.artifact?.steps.some((step) => step.risk === "risky" || step.risk === "irreversible")).toBe(true);
   });
 
   it("accepts a versioned artifact with typed IO, locators, policy, steps, and checkpoint", () => {

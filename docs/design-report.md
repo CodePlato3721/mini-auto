@@ -1,10 +1,12 @@
 # Architecture
 
-The system is a single-process TypeScript CLI with clear internal boundaries rather than separate services. `src/cli.ts` validates commands and environment configuration, `src/discovery.ts` owns model-driven exploration and artifact writing, `src/replay.ts` owns deterministic execution, browser adapters, outcome classification, evidence logging, and human handoff, and `src/contracts.ts` owns the Zod-validated artifact and result contracts.
+The system is a single-process TypeScript CLI organized around Onion Architecture rather than separate services. The core domain lives in `src/domain`, application use cases and ports live in `src/application`, CLI/HTTP interface adapters live in `src/interfaces`, and concrete Playwright/filesystem adapters live in `src/infrastructure`.
 
-Discovery and replay share the same `BrowserSurface` interface. That keeps Playwright-specific code at the edge and lets tests use `createMemorySurface` to exercise policy, redaction, outcome, and handoff behavior without relying on a browser. The CLI exposes `discover`, `replay`, and `replay-only`; the last two run saved artifacts without live model decisions.
+This shape fits a bank back-office product with multiple renters and one vendor-controlled system: the interface can stay simple while workflow policy, tenant variation, and exception handling become complex. `src/domain/contracts.ts` owns the Zod-validated artifact and result contracts. Application services own discovery, replay, and goal/input enrichment. `src/application/ports/browser-surface.ts` owns the surface port. `src/interfaces/cli.ts` validates command syntax and delegates business interpretation inward. `src/infrastructure/model/openai-decision-engine.ts` owns the OpenAI Responses API call used by live discovery. `src/infrastructure/browser/playwright-surface.ts` owns Playwright control, and `src/infrastructure/evidence/file-evidence-store.ts` owns JSONL, artifact, and text evidence files.
 
-The main tradeoff is intentional compactness. A production implementation would split orchestration, browser workers, evidence storage, and review surfaces into separate deployable components, but the prototype keeps those boundaries in code so the whole assignment remains runnable and inspectable.
+Discovery and replay share the same `BrowserSurface` boundary. That keeps browser implementation concerns outside the domain and lets tests use `createMemorySurface` to exercise policy, redaction, outcome, and handoff behavior without relying on a browser. The CLI exposes `discover`, `replay`, and `replay-only`; the last two run saved artifacts without live model decisions.
+
+The main tradeoff is intentional compactness. A production implementation would split browser workers, evidence storage, tenant configuration, and review surfaces into separate deployable components, but the prototype keeps those boundaries in code so the whole assignment remains runnable and inspectable.
 
 # Artifact schema
 
@@ -24,11 +26,17 @@ Policy and route checks run before or after actions as appropriate. Failure evid
 
 # Heterogeneity & multi-tenant
 
-The `BrowserSurface` interface is the portability boundary. The current adapter uses Playwright for web pages, but the same command model could target legacy web through frame-aware locators, table and text anchors, OCR-backed visual locators, or accessibility-tree controls. A desktop surface could implement the same methods over tools such as UI Automation, Apple Accessibility, or a VNC/RDP driver.
+The seam between recorded flow and surface-specific control is the `BrowserSurface` port. The artifact stores semantic workflow steps: `click`, `type`, `extract`, `checkpoint`, ordered locator candidates, input and output bindings, risk, and policy. It does not store Playwright objects, DOM handles, browser state, or model decisions. Replay asks a surface adapter to answer questions such as "does this locator exist?", "click this resolved target", "type this value", "what URL or visible text is current?", and "capture evidence." That means the same recorded flow can stay stable while the perception and action implementation changes per environment.
 
-For multi-tenant reuse, artifacts should separate canonical workflow intent from tenant overrides. A base artifact can define the steps, input and output contract, policy shape, and success checkpoint, while per-tenant overlays adjust domains, route prefixes, labels, locator priorities, and optional wait behavior.
+For a modern web app, the current Playwright adapter resolves test IDs, roles, labels, text, CSS, XPath, URL, and relative text. For a legacy web app, the adapter can add frame-aware resolution, table row anchors, brittle-but-contained XPath fallbacks, OCR text anchors, and visual targets without changing replay's control loop. For a desktop surface, another adapter could implement the same port over Windows UI Automation, Apple Accessibility, or an RDP/VNC driver. The artifact would still say "click the Approve button for account 123"; the adapter decides whether that means a DOM locator, accessibility node, OCR bounding box, or desktop control id.
 
-Drift management should be evidence-driven. Replay logs identify the exact step, expectation, and observed state, which can feed review tooling that proposes locator updates or flags a tenant-specific divergence. High-confidence changes can become tenant overlays; low-confidence or risky changes should route to human handoff.
+At scale, artifacts should be represented as layered assets rather than one recording per tenant in the single-vendor bank back-office system. A base artifact captures the vendor workflow for a product/version family: stable step IDs, semantic descriptions, input/output contract, expected success checkpoint, default locator candidates, and default safety policy. The tenant overlays specialize only what varies: domain and route prefixes, feature flags, tenant-specific labels, locator candidate priority, optional or skipped steps, wait budgets, known business outcomes, and risk handling. Overlays should be small, explicit, and versioned against the base artifact so review can see whether a tenant changed policy, targeting, or workflow shape.
+
+The runtime should resolve an execution plan by applying overlays in order: base vendor artifact, product-version overlay, tenant overlay, and emergency hotfix overlay. Each layer should be validated against the same schema and policy rules before replay starts. Overrides should reference stable step IDs instead of copying full step arrays, so a base artifact update can flow to hundreds of tenants without silently overwriting tenant-specific behavior.
+
+Drift detection should come from replay evidence. Every failure already records the step ID, expected condition, observed URL/text, locator candidates tried, screenshot/HTML where available, and whether handoff was needed. A production registry can aggregate this by vendor version and tenant: if many tenants fail on the same base step after a release, propose a base artifact update; if one tenant fails because of label or route differences, propose a tenant overlay; if the failed step is risky or low-confidence, route it to human review. Successful handoffs should record the operator summary and resumed step so later repair tooling can infer whether the artifact should skip ahead, add a locator, or model a tenant-specific branch.
+
+This design does not require implementing desktop automation or multi-tenant registry now, but it keeps the core abstraction from closing those paths. The domain owns workflow intent and policy; surface adapters own perception and actuation; overlays own tenant variation; evidence owns drift signals.
 
 # Escalation & handoff
 
@@ -36,15 +44,17 @@ The replay engine has explicit ownership states: `automation`, `human`, and `res
 
 An intervention request includes the goal, current step, reason, expected condition, observed browser state, and a redacted evidence snapshot. The handoff controller receives the same live `BrowserSurface` instance automation was using, so a human operates the current session rather than starting from a fresh browser.
 
-The terminal handoff controller is intentionally minimal: with `--human-handoff`, replay launches a headed browser, pauses automation, prints the request, and waits for a resume signal. Human activity summaries and ownership transitions are recorded in evidence before replay continues with the same workflow state.
+The terminal handoff controller is intentionally minimal but production-shaped: replay launches headed Chromium by default, pauses automation when handoff is needed, prints the request, and exposes Chromium remote-debugging attach instructions for the same live session. The operator fixes the visible browser session and types `resume`, `resume: <what changed>`, or `fail <reason>` when the issue cannot be resolved. After resume, replay reconciles the live page against the remaining artifact steps so a human can move the workflow forward before returning control. Human activity summaries, operator failure reasons, fast-forward decisions, and ownership transitions are recorded in evidence before replay continues or returns a structured hard failure.
 
 # Safety
 
-Safety is enforced through artifact policy and runtime checks. Discovery only accepts safe structured decisions on the target host. Replay validates allowed actions, allowed domains, allowed routes, and risky-action handling. Irreversible or risky actions are blocked unless policy explicitly routes them to handoff.
+Safety is enforced through artifact policy and runtime checks. Discovery accepts structured decisions on the target host, records each step's `safe`, `risky`, or `irreversible` label, applies a small deterministic normalization for common action classes such as login versus final checkout submit, and refuses navigation outside the target host. Replay validates allowed actions, allowed domains, allowed routes, and risky-action handling. Irreversible or risky actions are blocked unless policy explicitly routes them to handoff.
+
+The checked-in Sauce Demo artifact marks `finish-checkout` as `risky` with `riskyActionHandling: require_handoff`. Sauce Demo has no real-world side effect, but this models the production boundary where a bank back-office submit or approve action should require explicit operator review before execution.
 
 Inputs marked sensitive are redacted from logs and result observations. Additional redaction handles common password hints shown by the demo site. Local raw evidence and `.env` files are ignored, while committed demo evidence is generated through a sanitizer and covered by a test.
 
-The model is not trusted as an executor. It can propose discovery actions, but the runner validates action shape, target domain, and risk before acting. Replay does not use model decisions, which reduces nondeterminism and prevents model drift from changing a saved capability.
+The model is not trusted as the production executor. It can propose discovery actions and risk labels, but the runner validates action shape and target domain before acting. Replay does not use model decisions, which reduces nondeterminism and prevents model drift from changing a saved capability.
 
 # Cuts
 

@@ -1,6 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-
 import { z } from "zod";
 
 import {
@@ -13,21 +10,19 @@ import {
   type LocatorCandidate,
   type ReplayHardFailureResult,
   type ReplaySuccessResult
-} from "./contracts.js";
-import {
-  createPlaywrightSurface,
-  type BrowserSurface,
-  type FailureEvidenceContext,
-  type ResolvedLocator
-} from "./replay.js";
+} from "../domain/contracts.js";
+import type { EvidenceLog, EvidenceStore } from "./evidence.js";
+import type { BrowserSurface, FailureEvidenceContext, ResolvedLocator } from "./ports/browser-surface.js";
 
 export type DiscoveryOptions = {
   goal: string;
   targetUrl: string;
   inputs: Record<string, unknown>;
   evidenceDir: string;
+  evidenceStore: EvidenceStore;
   decisionEngine?: DecisionEngine;
   surface?: BrowserSurface;
+  surfaceFactory?: () => Promise<BrowserSurface>;
   maxSteps?: number;
 };
 
@@ -90,12 +85,12 @@ const decisionSchema = z.union([
 type DiscoveryDecision = z.infer<typeof decisionSchema>;
 
 export async function discoverCapability(options: DiscoveryOptions): Promise<DiscoveryResult> {
-  const evidenceDir = path.resolve(options.evidenceDir);
-  const logger = createDiscoveryLogger(evidenceDir);
+  const evidenceDir = options.evidenceDir;
+  const logger = options.evidenceStore.createDiscoveryLog(evidenceDir);
   let surface: BrowserSurface | undefined;
   const steps: CapabilityStep[] = [];
   const maxSteps = options.maxSteps ?? 30;
-  const engine = options.decisionEngine ?? new OpenAiDecisionEngine(process.env.MINI_AUTO_MODEL_API_KEY);
+  const engine = options.decisionEngine;
 
   logger.append("discovery.started", {
     goal: options.goal,
@@ -104,7 +99,15 @@ export async function discoverCapability(options: DiscoveryOptions): Promise<Dis
   });
 
   try {
-    surface = options.surface ?? (await createPlaywrightSurface());
+    if (!engine) {
+      throw new DiscoveryError("decision", "Decision engine", "No decision engine was provided");
+    }
+
+    surface = options.surface ?? (options.surfaceFactory ? await options.surfaceFactory() : undefined);
+
+    if (!surface) {
+      throw new DiscoveryError("browser.surface", "Browser surface", "No browser surface was provided");
+    }
     const target = new URL(options.targetUrl);
     let completed = false;
 
@@ -119,12 +122,13 @@ export async function discoverCapability(options: DiscoveryOptions): Promise<Dis
         priorSteps: steps,
         inputs: redactInputs(options.inputs)
       });
+      logger.append("decision.proposed", { stepNumber, decision: redactUnknown(rawDecision, options.inputs) });
       const parsedDecision = decisionSchema.safeParse(rawDecision);
       if (!parsedDecision.success) {
         throw new DiscoveryError(
           `step-${String(stepNumber).padStart(3, "0")}`,
           "Structured discovery decision",
-          parsedDecision.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+          parsedDecision.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ")
         );
       }
 
@@ -166,9 +170,11 @@ export async function discoverCapability(options: DiscoveryOptions): Promise<Dis
       );
     }
 
-    const artifactPath = path.resolve(evidenceDir, "discovered-capability.json");
-    await mkdir(evidenceDir, { recursive: true });
-    await writeFile(artifactPath, `${JSON.stringify(parsedArtifact.artifact, null, 2)}\n`, "utf8");
+    const artifactPath = await options.evidenceStore.writeJsonFile(
+      evidenceDir,
+      "discovered-capability.json",
+      parsedArtifact.artifact
+    );
     logger.append("artifact.written", {
       artifactId: parsedArtifact.artifact.metadata.id,
       artifactPath,
@@ -276,15 +282,41 @@ function toCapabilityStep(decision: Exclude<DiscoveryDecision, { complete: true 
     target: decision.target,
     inputBindings: decision.inputBindings,
     outputBindings: decision.outputBindings,
-    risk: decision.risk
+    risk: normalizeDiscoveryRisk(decision)
   };
 }
 
-function assertDiscoveryStepAllowed(step: CapabilityStep, target: URL): void {
-  if (step.risk !== "safe") {
-    throw new DiscoveryError(step.id, "Safe discovery action", `Action risk ${step.risk} is not allowed during discovery`);
+function normalizeDiscoveryRisk(decision: Exclude<DiscoveryDecision, { complete: true }>): CapabilityStep["risk"] {
+  if (decision.action !== "click") {
+    return decision.risk;
   }
 
+  const decisionText = [
+    decision.description,
+    ...(decision.target?.locatorCandidates ?? []).flatMap((candidate) => [candidate.strategy, candidate.value, candidate.name ?? ""])
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (/\b(delete|remove account|close account|transfer|wire|external payment|pay now)\b/.test(decisionText)) {
+    return "irreversible";
+  }
+
+  if (
+    /\b(finish|finalize|complete|place|confirm|submit)\b/.test(decisionText) &&
+    /\b(checkout|order|purchase|payment|approval)\b/.test(decisionText)
+  ) {
+    return "risky";
+  }
+
+  if (/\b(log in|login|sign in|signin|authenticate)\b/.test(decisionText)) {
+    return "safe";
+  }
+
+  return decision.risk;
+}
+
+function assertDiscoveryStepAllowed(step: CapabilityStep, target: URL): void {
   if (step.action === "handoff") {
     throw new DiscoveryError(step.id, "Discovery-supported action", "Handoff is not part of discovery ticket 05");
   }
@@ -341,7 +373,8 @@ function buildArtifact(args: {
     policy: {
       allowedDomains: [args.target.hostname],
       allowedRoutes: ["/", "/inventory.html", "/cart.html", "/checkout-step-one.html", "/checkout-step-two.html", "/checkout-complete.html"],
-      allowedActions: ["navigate", "click", "type", "wait", "extract", "checkpoint"]
+      allowedActions: ["navigate", "click", "type", "wait", "extract", "checkpoint"],
+      riskyActionHandling: "require_handoff"
     },
     steps: args.steps,
     successCheckpoint: {
@@ -397,6 +430,10 @@ function redactDecision(decision: DiscoveryDecision, inputs: Record<string, unkn
   return JSON.parse(redactString(JSON.stringify(decision), inputs)) as DiscoveryDecision;
 }
 
+function redactUnknown(value: unknown, inputs: Record<string, unknown>): unknown {
+  return JSON.parse(redactString(JSON.stringify(value), inputs)) as unknown;
+}
+
 function redactInputs(inputs: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(inputs).map(([name, value]) => [name, name.toLowerCase().includes("password") ? "[REDACTED]" : value])
@@ -413,28 +450,7 @@ function redactString(value: string, inputs: Record<string, unknown>): string {
   }, value);
 }
 
-type DiscoveryLog = {
-  path: string;
-  append(event: string, data: Record<string, unknown>): void;
-  flush(): Promise<void>;
-};
-
-function createDiscoveryLogger(evidenceDir: string): DiscoveryLog {
-  const logPath = path.resolve(evidenceDir, `discovery-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
-  const entries: string[] = [];
-  return {
-    path: logPath,
-    append(event, data) {
-      entries.push(JSON.stringify({ time: new Date().toISOString(), event, ...data }));
-    },
-    async flush() {
-      await mkdir(path.dirname(logPath), { recursive: true });
-      await writeFile(logPath, `${entries.join("\n")}\n`, "utf8");
-    }
-  };
-}
-
-class DiscoveryError extends Error {
+export class DiscoveryError extends Error {
   constructor(
     readonly stepId: string,
     readonly expected: string,
@@ -442,72 +458,4 @@ class DiscoveryError extends Error {
   ) {
     super(observed);
   }
-}
-
-class OpenAiDecisionEngine implements DecisionEngine {
-  constructor(private readonly apiKey?: string) {}
-
-  async decide(observation: BrowserObservation, context: DiscoveryContext): Promise<unknown> {
-    if (!this.apiKey) {
-      throw new DiscoveryError("decision", "MINI_AUTO_MODEL_API_KEY", "Missing model API key");
-    }
-
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: process.env.MINI_AUTO_MODEL ?? "gpt-5-mini",
-        input: [
-          {
-            role: "system",
-            content:
-              "Return only JSON for the next browser action. Use one of navigate, click, type, wait, extract, checkpoint, or {\"complete\":true}. Do not include prose."
-          },
-          {
-            role: "user",
-            content: JSON.stringify({ observation: sanitizeObservation(observation), context })
-          }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      throw new DiscoveryError("decision", "Successful model response", `${response.status} ${await response.text()}`);
-    }
-
-    const body = (await response.json()) as unknown;
-    const outputText = extractResponseText(body);
-    if (!outputText) {
-      throw new DiscoveryError("decision", "Model output_text JSON", JSON.stringify(body));
-    }
-
-    return JSON.parse(outputText) as unknown;
-  }
-}
-
-function extractResponseText(body: unknown): string | undefined {
-  if (typeof body !== "object" || body === null) {
-    return undefined;
-  }
-
-  if ("output_text" in body && typeof body.output_text === "string") {
-    return body.output_text;
-  }
-
-  const output = "output" in body && Array.isArray(body.output) ? body.output : [];
-  for (const item of output) {
-    if (typeof item !== "object" || item === null || !("content" in item) || !Array.isArray(item.content)) {
-      continue;
-    }
-    for (const content of item.content) {
-      if (typeof content === "object" && content !== null && "text" in content && typeof content.text === "string") {
-        return content.text;
-      }
-    }
-  }
-
-  return undefined;
 }

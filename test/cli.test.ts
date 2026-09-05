@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runCli } from "../src/cli.js";
-import type { DecisionEngine } from "../src/discovery.js";
-import { createMemorySurface, type HumanHandoffController } from "../src/replay.js";
+import { runCli } from "../src/interfaces/cli.js";
+import type { DecisionEngine } from "../src/application/discovery.js";
+import type { HumanHandoffController } from "../src/application/ports/human-handoff.js";
+import { createMemorySurface } from "../src/infrastructure/browser/memory-surface.js";
 
 const tempDirs: string[] = [];
 
@@ -25,14 +26,17 @@ describe("CLI scaffold", () => {
 
     expect(exitCode).toBe(0);
     expect(result.ok).toBe(true);
-    expect(stdout).toContain("mini-auto discover --goal <text> --target-url <url>");
-    expect(stdout).toContain("mini-auto replay --artifact <path> [--goal <text>]");
-    expect(stdout).toContain("mini-auto replay-only --artifact <path> [--goal <text>]");
-    expect(stdout).toContain("MINI_AUTO_PASSWORD");
+    const parsed = JSON.parse(stdout);
+    expect(parsed.message).toContain("mini-auto discover --goal <text> --target-url <url>");
+    expect(parsed.message).toContain("mini-auto replay --artifact <path> [--goal <text>]");
+    expect(parsed.message).toContain("mini-auto replay-only --artifact <path> [--goal <text>]");
+    expect(parsed.message).toContain("MINI_AUTO_PASSWORD");
+    expect(parsed.message).not.toContain("[--json]");
+    expect(parsed.message).not.toContain("[--human-handoff]");
   });
 
   it("returns structured configuration errors instead of throwing", async () => {
-    const { result, stdout, exitCode } = await runCli(["discover", "--json"], {});
+    const { result, stdout, exitCode } = await runCli(["discover"], {});
 
     expect(exitCode).toBe(1);
     expect(result.kind).toBe("configuration_error");
@@ -60,7 +64,7 @@ describe("CLI scaffold", () => {
     };
 
     const { result, stdout, exitCode } = await runCli(
-      ["discover", "--goal", "Open Sauce Demo", "--target-url", "https://www.saucedemo.com/", "--inputs-file", inputsPath, "--json"],
+      ["discover", "--goal", "Open Sauce Demo", "--target-url", "https://www.saucedemo.com/", "--inputs-file", inputsPath],
       { MINI_AUTO_EVIDENCE_DIR: evidenceDir, MINI_AUTO_MODEL_API_KEY: "test-key" },
       {
         decisionEngine,
@@ -130,7 +134,7 @@ describe("CLI scaffold", () => {
     await writeFile(inputsPath, JSON.stringify({ username: "standard_user" }), "utf8");
 
     const { result, stdout, exitCode } = await runCli(
-      ["replay-only", "--artifact", artifactPath, "--inputs-file", inputsPath, "--json"],
+      ["replay-only", "--artifact", artifactPath, "--inputs-file", inputsPath],
       { MINI_AUTO_EVIDENCE_DIR: evidenceDir },
       {
         replaySurface: createMemorySurface({
@@ -248,8 +252,7 @@ describe("CLI scaffold", () => {
         "--goal",
         "Log in as standard_user and add Sauce Labs Backpack to the cart.",
         "--inputs-file",
-        inputsPath,
-        "--json"
+        inputsPath
       ],
       { MINI_AUTO_EVIDENCE_DIR: evidenceDir, MINI_AUTO_PASSWORD: "secret_sauce" },
       { replaySurface: surface }
@@ -271,7 +274,7 @@ describe("CLI scaffold", () => {
   it("returns a structured configuration error when the artifact file is missing", async () => {
     const evidenceDir = await tempEvidenceDir();
     const { result, stdout, exitCode } = await runCli(
-      ["replay", "--artifact", path.join(evidenceDir, "missing.json"), "--json"],
+      ["replay", "--artifact", path.join(evidenceDir, "missing.json")],
       { MINI_AUTO_EVIDENCE_DIR: evidenceDir }
     );
 
@@ -284,7 +287,7 @@ describe("CLI scaffold", () => {
     });
   });
 
-  it("passes human handoff control through replay when requested", async () => {
+  it("passes human handoff control through replay by default", async () => {
     const evidenceDir = await tempEvidenceDir();
     const artifactPath = path.join(evidenceDir, "handoff-artifact.json");
     await writeFile(
@@ -344,7 +347,7 @@ describe("CLI scaffold", () => {
     };
 
     const { result, stdout, exitCode } = await runCli(
-      ["replay", "--artifact", artifactPath, "--inputs-json", "{\"username\":\"standard_user\"}", "--human-handoff", "--json"],
+      ["replay", "--artifact", artifactPath, "--inputs-json", "{\"username\":\"standard_user\"}"],
       { MINI_AUTO_EVIDENCE_DIR: evidenceDir },
       {
         replaySurface: createMemorySurface({

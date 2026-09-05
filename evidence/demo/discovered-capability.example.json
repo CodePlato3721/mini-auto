@@ -4,7 +4,7 @@
     "id": "discovered-sauce-demo-checkout",
     "name": "Discovered Sauce Demo Checkout",
     "description": "Log in to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
-    "createdAt": "2026-09-01T03:24:39.885Z",
+    "createdAt": "2026-09-01T03:54:36.214Z",
     "source": "llm-discovery"
   },
   "inputs": [

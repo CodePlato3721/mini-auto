@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseCapabilityArtifact } from "../src/contracts.js";
-import { discoverCapability, type DecisionEngine } from "../src/discovery.js";
-import { createMemorySurface } from "../src/replay.js";
+import { discoverCapability, type DecisionEngine } from "../src/application/discovery.js";
+import { parseCapabilityArtifact } from "../src/domain/contracts.js";
+import { createMemorySurface } from "../src/infrastructure/browser/memory-surface.js";
+import { createFileEvidenceStore } from "../src/infrastructure/evidence/file-evidence-store.js";
 
 const tempDirs: string[] = [];
+const evidenceStore = createFileEvidenceStore();
 
 async function tempEvidenceDir(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "mini-auto-discovery-"));
@@ -70,6 +72,7 @@ describe("LLM-driven discovery", () => {
       targetUrl: "https://www.saucedemo.com/",
       inputs: { username: "standard_user", password: "secret_sauce" },
       evidenceDir,
+      evidenceStore,
       decisionEngine: engine,
       surface
     });
@@ -83,6 +86,7 @@ describe("LLM-driven discovery", () => {
     const parsed = parseCapabilityArtifact(artifact);
     expect(parsed.ok).toBe(true);
     expect(parsed.artifact?.metadata.source).toBe("llm-discovery");
+    expect(parsed.artifact?.policy.riskyActionHandling).toBe("require_handoff");
     expect(parsed.artifact?.steps.map((step) => step.id)).toEqual([
       "step-001",
       "step-002",
@@ -100,13 +104,99 @@ describe("LLM-driven discovery", () => {
     expect(evidence).not.toContain("secret_sauce");
   });
 
+  it("records risky discovery actions into the artifact instead of stopping discovery", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const result = await discoverCapability({
+      goal: "Finish a demo checkout",
+      targetUrl: "https://www.saucedemo.com/",
+      inputs: { approvalContext: "demo" },
+      evidenceDir,
+      evidenceStore,
+      decisionEngine: scriptedDecisionEngine([
+        {
+          action: "click",
+          description: "Finish checkout.",
+          target: { locatorCandidates: [{ strategy: "testId", value: "finish" }] },
+          risk: "risky"
+        },
+        { complete: true }
+      ]),
+      surface: createMemorySurface({
+        finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+        visibleText: "Thank you for your order!",
+        locators: {
+          "testId:finish": ""
+        }
+      })
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+    const artifact = JSON.parse(await readFile(result.artifactPath, "utf8")) as unknown;
+    const parsed = parseCapabilityArtifact(artifact);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.artifact?.steps[0]).toMatchObject({
+      action: "click",
+      description: "Finish checkout.",
+      risk: "risky"
+    });
+  });
+
+  it("normalizes discovery risk labels for login and final checkout clicks", async () => {
+    const evidenceDir = await tempEvidenceDir();
+    const result = await discoverCapability({
+      goal: "Log in and finish a demo checkout",
+      targetUrl: "https://www.saucedemo.com/",
+      inputs: { username: "standard_user", password: "secret_sauce" },
+      evidenceDir,
+      evidenceStore,
+      decisionEngine: scriptedDecisionEngine([
+        {
+          action: "click",
+          description: "Click the login button to sign in.",
+          target: { locatorCandidates: [{ strategy: "testId", value: "login-button" }] },
+          risk: "risky"
+        },
+        {
+          action: "click",
+          description: "Click the Finish button to complete the checkout.",
+          target: { locatorCandidates: [{ strategy: "testId", value: "finish" }] },
+          risk: "safe"
+        },
+        { complete: true }
+      ]),
+      surface: createMemorySurface({
+        finalUrl: "https://www.saucedemo.com/checkout-complete.html",
+        visibleText: "Thank you for your order!",
+        locators: {
+          "testId:login-button": "Login",
+          "testId:finish": "Finish"
+        }
+      })
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+
+    const artifact = JSON.parse(await readFile(result.artifactPath, "utf8")) as unknown;
+    const parsed = parseCapabilityArtifact(artifact);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.artifact?.steps.map((step) => step.risk)).toEqual(["safe", "risky"]);
+  });
+
   it("rejects malformed model decisions before acting", async () => {
     const surface = createMemorySurface();
+    const evidenceDir = await tempEvidenceDir();
     const result = await discoverCapability({
       goal: "Do something unsafe",
       targetUrl: "https://www.saucedemo.com/",
       inputs: {},
-      evidenceDir: await tempEvidenceDir(),
+      evidenceDir,
+      evidenceStore,
       decisionEngine: {
         async decide() {
           return { action: "open_everything" };
@@ -120,6 +210,13 @@ describe("LLM-driven discovery", () => {
       kind: "hard_failure"
     });
     expect(surface.calls).toEqual([]);
+    const evidence = await readFile(result.evidence[0], "utf8");
+    expect(evidence).toContain('"event":"decision.proposed"');
+    expect(evidence).toContain('"action":"open_everything"');
+    if (result.ok) {
+      throw new Error("Expected malformed decision to fail.");
+    }
+    expect(result.observed).toContain("<root>");
   });
 
   it("rejects unsafe structured model decisions before acting", async () => {
@@ -129,6 +226,7 @@ describe("LLM-driven discovery", () => {
       targetUrl: "https://www.saucedemo.com/",
       inputs: {},
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       decisionEngine: {
         async decide() {
           return {
@@ -156,6 +254,7 @@ describe("LLM-driven discovery", () => {
       targetUrl: "https://www.saucedemo.com/",
       inputs: {},
       evidenceDir: await tempEvidenceDir(),
+      evidenceStore,
       maxSteps: 1,
       decisionEngine: {
         async decide() {

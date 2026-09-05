@@ -1,9 +1,10 @@
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runCli } from "../src/cli.js";
-import type { DecisionEngine } from "../src/discovery.js";
-import { createMemorySurface } from "../src/replay.js";
+import { runCli } from "../src/interfaces/cli.js";
+import type { DecisionEngine } from "../src/application/discovery.js";
+import type { HumanHandoffController } from "../src/application/ports/human-handoff.js";
+import { createMemorySurface } from "../src/infrastructure/browser/memory-surface.js";
 
 const repoRoot = process.cwd();
 const evidenceRoot = path.resolve(repoRoot, "evidence", "demo");
@@ -38,8 +39,7 @@ async function main(): Promise<void> {
       "--target-url",
       "https://www.saucedemo.com/",
       "--inputs-json",
-      JSON.stringify(fileInputs()),
-      "--json"
+      JSON.stringify(fileInputs())
     ],
     {
       MINI_AUTO_EVIDENCE_DIR: scriptedDiscoveryDir,
@@ -75,10 +75,10 @@ async function main(): Promise<void> {
       "--goal",
       "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout.",
       "--inputs-file",
-      replayInputs,
-      "--json"
+      replayInputs
     ],
-    { MINI_AUTO_EVIDENCE_DIR: replayDir, MINI_AUTO_PASSWORD: demoPassword() }
+    { MINI_AUTO_EVIDENCE_DIR: replayDir, MINI_AUTO_PASSWORD: demoPassword() },
+    { handoffController: scriptedHandoffController() }
   );
   await rm(replayInputs, { force: true });
   await writeFile(path.join(replayDir, "result.json"), sanitize(replay.stdout), "utf8");
@@ -96,8 +96,7 @@ async function main(): Promise<void> {
       "--goal",
       "Log in as standard_user, add Sauce Labs Backpack to the cart, and complete checkout.",
       "--inputs-file",
-      badInputs,
-      "--json"
+      badInputs
     ],
     { MINI_AUTO_EVIDENCE_DIR: exceptionalDir, MINI_AUTO_PASSWORD: "wrong_password" }
   );
@@ -115,11 +114,10 @@ async function main(): Promise<void> {
         "discover",
         "--goal",
         "Log in as standard_user to Sauce Demo, add Sauce Labs Backpack to the cart, complete checkout with fake customer data, and verify the order confirmation.",
-        "--target-url",
-        "https://www.saucedemo.com/",
-        "--inputs-file",
-        discoveryInputs,
-        "--json"
+      "--target-url",
+      "https://www.saucedemo.com/",
+      "--inputs-file",
+      discoveryInputs
       ],
       { ...process.env, MINI_AUTO_EVIDENCE_DIR: discoveryDir }
     );
@@ -141,6 +139,17 @@ async function main(): Promise<void> {
   }
 
   await writeManifest();
+}
+
+function scriptedHandoffController(): HumanHandoffController {
+  return {
+    async waitForResume(context) {
+      return {
+        signal: "resume",
+        activities: [{ description: `Scripted demo approved ${context.request.stepId}.` }]
+      };
+    }
+  };
 }
 
 function fileInputs(): Record<string, string> {
@@ -264,7 +273,7 @@ function scriptedCheckoutEngine(): DecisionEngine {
       action: "click",
       description: "Finish checkout.",
       target: { locatorCandidates: [{ strategy: "testId", value: "finish" }] },
-      risk: "safe"
+      risk: "risky"
     },
     {
       action: "checkpoint",
